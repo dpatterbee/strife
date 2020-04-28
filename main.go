@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
@@ -9,37 +8,27 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"cloud.google.com/go/datastore"
-	"time"
 )
-
-type Task struct {
-	Category        string
-	Done            bool
-	Priority        float64
-	Description     string `datastore:",noindex"`
-	PercentComplete float64
-	Created         time.Time
-}
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
 	flag.Parse()
-	commands = make(map[string]map[string]string)
+	servers = make(map[string]*server)
+	defaultCommands = makeDefaultCommands()
+
 }
 
 var token string
-var commands map[string]map[string]string
+var servers map[string]*server
+var defaultCommands map[string]func(*discordgo.MessageCreate, string) string
+
+type server struct {
+	commands map[string]string
+	name string
+	prefix string
+}
 
 func main() {
-	ctx := context.Background()
-	projectID := "temporal-storm-273719"
-
-	client, err := datastore.NewClient(ctx, projectID)
-	if err != nil {
-		panic(err)
-	}
-
 	if token == "" {
 		fmt.Println("No token provided. Please use: scrabl -t <bot token>")
 		return
@@ -51,6 +40,15 @@ func main() {
 		return
 	}
 	defer dg.Close()
+
+	guilds, _ := dg.UserGuilds(100, "", "")
+	for _, v := range guilds {
+		servers[v.ID] = &server{
+			commands:make(map[string]string),
+			name:v.Name,
+			prefix:getGuildPrefix(v.ID),
+		}
+	}
 
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
@@ -66,6 +64,10 @@ func main() {
 	fmt.Print("\n")
 }
 
+func getGuildPrefix(id string) string {
+	return "!"
+}
+
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 	err := s.UpdateStatus(0, "dev")
 	if err != nil {
@@ -79,73 +81,27 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if !strings.HasPrefix(m.Content, "!") {
+	currentServer := servers[m.GuildID]
+
+	if !strings.HasPrefix(m.Content, currentServer.prefix) {
 		return
 	}
-	content := strings.TrimPrefix(m.Content, "!")
+	content := strings.TrimPrefix(m.Content, currentServer.prefix)
 
 	splitContent := strings.Split(content, " ")
 	content = strings.TrimPrefix(content, splitContent[0] + " ")
 
 	var response string
 
-	switch splitContent[0] {
-	case "marco":
-		s.ChannelMessageSend(m.ChannelID, "polo")
-	case "commands":
+	if isDefaultCommand(splitContent[0]) {
+		oo := defaultCommands[splitContent[0]]
 
-		if len(splitContent) < 2 {
-			response = "options for commands are add, remove"
-			break
-		}
-
-		switch splitContent[1] {
-		case "add":
-
-			if len(splitContent) < 4 {
-				response = "add syntax is: add <command name> <command text>"
-				break
-			}
-
-			var commandText strings.Builder
-			for _, v := range splitContent[3:] {
-				commandText.WriteString(v + " ")
-			}
-
-			response = createCommand(m.GuildID, splitContent[2], strings.TrimSpace(commandText.String()))
-
-		case "remove":
-
-			if len(splitContent) < 3 {
-				response = "remove syntax is: remove <commmand name to be remove>"
-				break
-			}
-
-
-
-			response = removeCommand(m.GuildID, splitContent[2])
-
-		case "edit":
-
-			if len(splitContent) < 4 {
-				response = "edit syntax is: edit <command name> <new command text>"
-				break
-			}
-
-			var commandText strings.Builder
-			for _, v := range splitContent[3:] {
-				commandText.WriteString(v + " ")
-			}
-
-			response = editCommand(m.GuildID, splitContent[2], strings.TrimSpace(commandText.String()))
-		}
-
-
-	default:
-		rp, ok := commands[m.GuildID][splitContent[0]]
-
-		if ok {
-			response = rp
+		response = oo(m, content)
+	} else {
+		var ok bool
+		response, ok = currentServer.commands[splitContent[0]]
+		if !ok {
+			response = "Command doesn't exist!"
 		}
 	}
 
@@ -156,58 +112,5 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		fmt.Println(test)
 	}
-
-}
-
-func createCommand(guildID, command, response string) string {
-
-	_, ok := commands[guildID]
-	if !ok {
-		commands[guildID] = make(map[string]string)
-	}
-
-	if strings.HasPrefix(command, "!") {
-		command = strings.TrimPrefix(command, "!")
-	}
-
-	_, ok = commands[guildID][command]
-	if ok {
-		return fmt.Sprintf("Command \"%v\" already exists", command)
-	}
-
-	commands[guildID][command] = response
-	return fmt.Sprintf("Command \"%v\" has been successfully added!", command)
-}
-
-func removeCommand(guildID, commandName string) string {
-
-	if strings.HasPrefix(commandName, "!") {
-		commandName = strings.TrimPrefix(commandName, "!")
-	}
-
-	_, ok := commands[guildID][commandName]
-
-	if !ok {
-		return fmt.Sprintf("Command \"%v\" does not exist", commandName)
-	}
-
-	delete(commands[guildID], commandName)
-	return fmt.Sprintf("Command \"%v\" has been deleted", commandName)
-}
-
-func editCommand(guildID, commandName, commandText string) string {
-
-	if strings.HasPrefix(commandName, "!") {
-		commandName = strings.TrimPrefix(commandName, "!")
-	}
-
-	_, ok := commands[guildID][commandName]
-
-	if !ok {
-		return fmt.Sprintf("Command %v does not exist", commandName)
-	}
-
-	commands[guildID][commandName] = commandText
-	return fmt.Sprintf("Command %v has been edited", commandName)
 
 }
