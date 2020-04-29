@@ -20,12 +20,13 @@ func init() {
 
 var token string
 var servers map[string]*server
-var defaultCommands map[string]func(*discordgo.MessageCreate, string) string
+var defaultCommands map[string]defCommand
 
 type server struct {
 	commands map[string]string
 	name string
 	prefix string
+	roles []*discordgo.Role
 }
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 			commands:make(map[string]string),
 			name:v.Name,
 			prefix:getGuildPrefix(v.ID),
+			roles:getServerRoles(dg, v.ID),
 		}
 	}
 
@@ -61,7 +63,6 @@ func main() {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
-	fmt.Print("\n")
 }
 
 func getGuildPrefix(id string) string {
@@ -95,8 +96,12 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if isDefaultCommand(splitContent[0]) {
 		oo := defaultCommands[splitContent[0]]
+		var err error
+		response, err = oo(s, m, content)
 
-		response = oo(m, content)
+		if err != nil {
+			response = err.Error()
+		}
 	} else {
 		var ok bool
 		response, ok = currentServer.commands[splitContent[0]]
@@ -113,4 +118,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		fmt.Println(test)
 	}
 
+}
+
+func getServerRoles(s *discordgo.Session, i string) ([]*discordgo.Role) {
+	e, _ := s.GuildRoles(i)
+
+	return e
 }
