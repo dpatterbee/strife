@@ -20,13 +20,13 @@ func init() {
 
 var token string
 var servers map[string]*server
-var defaultCommands map[string]defCommand
+var defaultCommands map[string]dfc
 
 type server struct {
 	commands map[string]string
 	name string
 	prefix string
-	roles []*discordgo.Role
+	roles map[string]int
 }
 
 func main() {
@@ -97,7 +97,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if isDefaultCommand(splitContent[0]) {
 		oo := defaultCommands[splitContent[0]]
 		var err error
-		response, err = oo(s, m, content)
+
+		neededPermission := oo.permission
+		fun := oo.fonk
+
+		if userPermissionLevel(s, m) >= neededPermission {
+			fmt.Println(userPermissionLevel(s, m), neededPermission)
+			response, err = fun(s, m, content)
+		} else {
+			response = "Invalid Permission level"
+		}
 
 		if err != nil {
 			response = err.Error()
@@ -120,8 +129,25 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 }
 
-func getServerRoles(s *discordgo.Session, i string) ([]*discordgo.Role) {
+func getServerRoles(s *discordgo.Session, i string) map[string]int {
 	e, _ := s.GuildRoles(i)
 
-	return e
+	m := make(map[string]int)
+
+	for _, v := range e {
+		if v.Name == "botuser" {
+			m[v.ID] = botuser
+		}
+		if v.Name == "botdj" {
+			m[v.ID] = botdj
+		}
+		if v.Name == "botmoderator" {
+			m[v.ID] = botmoderator
+		}
+		if v.Name == "botadmin" {
+			m[v.ID] = botadmin
+		}
+	}
+
+	return m
 }

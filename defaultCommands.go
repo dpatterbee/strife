@@ -10,30 +10,38 @@ import (
 type dfc struct {
 	command string
 	fonk defCommand
+	permission int
 }
+
+const (
+	botnobody = iota
+	botuser = iota
+	botdj = iota
+	botmoderator = iota
+	botadmin = iota
+)
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
-
 var something = []dfc{
 	{
-		command: "marco", fonk: polo,
+		command: "marco", fonk: polo, permission: botnobody,
 	},
 	{
-		command: "commands", fonk: commandsCommand,
+		command: "commands", fonk: commandsCommand, permission: botnobody,
 	},
 	{
-		command: "prefix", fonk:prefix,
+		command: "prefix", fonk:prefix, permission: botmoderator,
 	},
 	{
-		command: "list", fonk:listCustoms,
+		command: "list", fonk:listCustoms, permission: botnobody,
 	},
 }
 
-func makeDefaultCommands() map[string]defCommand {
-	cmds := make(map[string]defCommand)
+func makeDefaultCommands() map[string]dfc {
+	cmds := make(map[string]dfc)
 
 	for _, v := range something {
-		cmds[v.command] = v.fonk
+		cmds[v.command] = v
 	}
 
 	return cmds
@@ -51,11 +59,6 @@ func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s stri
 
 	switch splitString[0] {
 	case "add":
-
-		if !hasPermission(sess, m, "add") {
-			return "", errors.New("invalid permission")
-		}
-
 		sss := splitString[1:]
 		if len(sss) < 2 {
 			return "add syntax is: add <command name> <command text>", nil
@@ -69,10 +72,6 @@ func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s stri
 		servers[guildID].commands[sss[0]] = sss[1]
 		return fmt.Sprintf("Command \"%v\" has been successfully added!", sss[0]), nil
 	case "edit":
-
-		if !hasPermission(sess, m, "add") {
-			return "", errors.New("invalid permission")
-		}
 
 		sss := splitString[1:]
 
@@ -89,10 +88,6 @@ func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s stri
 		return fmt.Sprintf("Command \"%v\" has been successfully updated."), nil
 
 	case "remove":
-
-		if !hasPermission(sess, m, "add") {
-			return "", errors.New("invalid permission")
-		}
 
 		sss := splitString[1:]
 
@@ -149,12 +144,20 @@ func isDefaultCommand(s string) bool {
 	return ok
 }
 
-func hasPermission(s *discordgo.Session, m *discordgo.MessageCreate, c string) bool {
-	st, _ := s.GuildMember(m.GuildID, m.Author.ID)
+func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 
-	for _, v := range st.Roles {
+	b, _ := s.GuildMember(m.GuildID, m.Author.ID)
 
+	highestPermission := botuser
+	for _, v := range b.Roles {
+		if val, ok := servers[m.GuildID].roles[v]; ok {
+			if val > highestPermission {
+				highestPermission = val
+			}
+		}
 	}
 
-	return false
+	return highestPermission
+
+
 }
