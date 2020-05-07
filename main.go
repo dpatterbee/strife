@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
@@ -13,6 +14,11 @@ import (
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
 	flag.Parse()
+	if token == "" {
+		reader := bufio.NewReader(os.Stdin)
+		d, _ := reader.ReadString('\n')
+		token = d[1:len(d)-2]
+	}
 	servers = make(map[string]*server)
 	defaultCommands = makeDefaultCommands()
 
@@ -63,6 +69,7 @@ func main() {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
+	fmt.Print("\n")
 }
 
 func getGuildPrefix(id string) string {
@@ -95,15 +102,15 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var response string
 
 	if isDefaultCommand(splitContent[0]) {
-		oo := defaultCommands[splitContent[0]]
+		requestedCommand := defaultCommands[splitContent[0]]
 		var err error
 
-		neededPermission := oo.permission
-		fun := oo.fonk
+		neededPermission := requestedCommand.permission
+		commandFunc := requestedCommand.function
 
 		if userPermissionLevel(s, m) >= neededPermission {
 			fmt.Println(userPermissionLevel(s, m), neededPermission)
-			response, err = fun(s, m, content)
+			response, err = commandFunc(s, m, content)
 		} else {
 			response = "Invalid Permission level"
 		}

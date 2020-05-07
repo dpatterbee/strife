@@ -1,0 +1,3 @@
+#/bin/sh
+
+go build && jq .key < $HOME/.config/strife-bot/config.json | ./strife

@@ -8,32 +8,41 @@ import (
 )
 
 type dfc struct {
-	command string
-	fonk defCommand
+	command    string
+	function   defCommand
 	permission int
 }
 
 const (
-	botnobody = iota
-	botuser = iota
-	botdj = iota
+	botunknown   = iota
+	botuser      = iota
+	botdj        = iota
 	botmoderator = iota
-	botadmin = iota
+	botadmin     = iota
 )
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
 var something = []dfc{
 	{
-		command: "marco", fonk: polo, permission: botnobody,
+		command: "marco", function: polo, permission: botunknown,
 	},
 	{
-		command: "commands", fonk: commandsCommand, permission: botnobody,
+		command: "commands", function: commandsCommand, permission: botunknown,
 	},
 	{
-		command: "prefix", fonk:prefix, permission: botmoderator,
+		command: "addcommand", function: addCommand, permission: botmoderator,
 	},
 	{
-		command: "list", fonk:listCustoms, permission: botnobody,
+		command: "editcommand", function: editCommand, permission: botmoderator,
+	},
+	{
+		command: "removecommand", function: removeCommand, permission: botmoderator,
+	},
+	{
+		command: "prefix", function:prefix, permission: botmoderator,
+	},
+	{
+		command: "customs", function:listCustoms, permission: botunknown,
 	},
 }
 
@@ -47,64 +56,69 @@ func makeDefaultCommands() map[string]dfc {
 	return cmds
 }
 
-func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
-
+func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
 	guildID := m.GuildID
 
-	splitString := strings.SplitN(s, " ", 3)
+	splitString := strings.SplitN(s, " ", 2)
 
 	if len(splitString) < 2 {
-		return "", fmt.Errorf("Unrecognised Command: %v", splitString[0])
+		return "Correct Syntax is: !addcommand <command name> <command text>", nil
 	}
 
-	switch splitString[0] {
-	case "add":
-		sss := splitString[1:]
-		if len(sss) < 2 {
-			return "add syntax is: add <command name> <command text>", nil
-		}
-
-		_, ok := servers[guildID].commands[sss[0]]
-		if ok {
-			return fmt.Sprintf("Command \"%v\" already exists", sss[0]), nil
-		}
-
-		servers[guildID].commands[sss[0]] = sss[1]
-		return fmt.Sprintf("Command \"%v\" has been successfully added!", sss[0]), nil
-	case "edit":
-
-		sss := splitString[1:]
-
-		if len(sss) < 2 {
-			return "edit syntax is: edit <command name> <new command text>", nil
-		}
-
-		_, ok := servers[guildID].commands[sss[0]]
-		if !ok {
-			return fmt.Sprintf("Command \"%v\" does not exist", sss[0]), nil
-		}
-
-		servers[guildID].commands[sss[0]] = sss[1]
-		return fmt.Sprintf("Command \"%v\" has been successfully updated."), nil
-
-	case "remove":
-
-		sss := splitString[1:]
-
-		if len(sss) > 1 {
-			return "remove syntax is: remove <command name to be remove>", nil
-		}
-
-		_, ok := servers[guildID].commands[sss[0]]
-		if !ok {
-			return fmt.Sprintf("Command \"%v\" does not exist", sss[0]), nil
-		}
-
-		delete(servers[guildID].commands, sss[0])
-		return fmt.Sprintf("Command \"%v\" successfully removed.", sss[0]), nil
-	default:
-		return "Unrecognised Command", nil
+	command := splitString[0]
+	_, ok := servers[guildID].commands[command]
+	if ok {
+		return fmt.Sprintf("Command \"%v\" already exists!", command), nil
 	}
+
+	servers[guildID].commands[command] = splitString[1]
+	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), nil
+}
+
+func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+	guildID := m.GuildID
+
+	splitString := strings.SplitN(s, " ", 2)
+
+	if len(splitString) < 2 {
+		return "syntax problem", nil
+	}
+	command := splitString[0]
+	_, ok := servers[guildID].commands[command]
+	if !ok {
+		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
+	}
+
+	servers[guildID].commands[command] = splitString[1]
+	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), nil
+
+}
+
+func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+	guildID := m.GuildID
+
+	splitString := strings.SplitN(s, " ", 2)
+
+	if len(splitString) > 1 {
+		return "Too many args", nil
+	}
+
+	command := splitString[0]
+	_, ok := servers[guildID].commands[command]
+	if !ok {
+		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
+	}
+
+	delete(servers[guildID].commands, command)
+
+	return fmt.Sprintf("Command \"%v\" successfully removed!", command), nil
+
+}
+
+func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+
+	return "This command will list commands when I can be bothered typing what they all do", nil
+
 }
 
 func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
