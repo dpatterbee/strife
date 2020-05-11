@@ -2,9 +2,13 @@ package main
 
 import (
 	"bufio"
+	"cloud.google.com/go/firestore"
+	"context"
+	firebase "firebase.google.com/go"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"google.golang.org/api/option"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,11 +17,12 @@ import (
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
+	flag.StringVar(&firebaseAuthFile, "f", "", "Firebase Auth File")
 	flag.Parse()
 	if token == "" {
 		reader := bufio.NewReader(os.Stdin)
 		d, _ := reader.ReadString('\n')
-		token = d[1:len(d)-2]
+		token = d[1 : len(d)-2]
 	}
 	servers = make(map[string]*server)
 	defaultCommands = makeDefaultCommands()
@@ -25,15 +30,11 @@ func init() {
 }
 
 var token string
+var firebaseAuthFile string
 var servers map[string]*server
 var defaultCommands map[string]dfc
-
-type server struct {
-	commands map[string]string
-	name string
-	prefix string
-	roles map[string]int
-}
+var client *firestore.Client
+var ctx context.Context
 
 func main() {
 	if token == "" {
@@ -48,15 +49,20 @@ func main() {
 	}
 	defer dg.Close()
 
-	guilds, _ := dg.UserGuilds(100, "", "")
-	for _, v := range guilds {
-		servers[v.ID] = &server{
-			commands:make(map[string]string),
-			name:v.Name,
-			prefix:getGuildPrefix(v.ID),
-			roles:getServerRoles(dg, v.ID),
-		}
+	ctx = context.Background()
+	sa := option.WithCredentialsFile(firebaseAuthFile)
+	app, err := firebase.NewApp(ctx, nil, sa)
+	if err != nil {
+		panic(err)
 	}
+
+	client, err = app.Firestore(ctx)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	servers = buildServerData(dg, client, ctx)
 
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
@@ -70,10 +76,6 @@ func main() {
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 	fmt.Print("\n")
-}
-
-func getGuildPrefix(id string) string {
-	return "!"
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
@@ -91,13 +93,13 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	currentServer := servers[m.GuildID]
 
-	if !strings.HasPrefix(m.Content, currentServer.prefix) {
+	if !strings.HasPrefix(m.Content, currentServer.Prefix) {
 		return
 	}
-	content := strings.TrimPrefix(m.Content, currentServer.prefix)
+	content := strings.TrimPrefix(m.Content, currentServer.Prefix)
 
 	splitContent := strings.Split(content, " ")
-	content = strings.TrimPrefix(content, splitContent[0] + " ")
+	content = strings.TrimPrefix(content, splitContent[0]+" ")
 
 	var response string
 
@@ -120,7 +122,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	} else {
 		var ok bool
-		response, ok = currentServer.commands[splitContent[0]]
+		response, ok = currentServer.Commands[splitContent[0]]
 		if !ok {
 			response = "Command doesn't exist!"
 		}
@@ -136,10 +138,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 }
 
-func getServerRoles(s *discordgo.Session, i string) map[string]int {
+func getServerRoles(s *discordgo.Session, i string) map[string]int64 {
 	e, _ := s.GuildRoles(i)
 
-	m := make(map[string]int)
+	m := make(map[string]int64)
 
 	for _, v := range e {
 		if v.Name == "botuser" {

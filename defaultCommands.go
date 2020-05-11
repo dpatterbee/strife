@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cloud.google.com/go/firestore"
 	"errors"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
@@ -22,6 +23,7 @@ const (
 )
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
+
 var something = []dfc{
 	{
 		command: "marco", function: polo, permission: botunknown,
@@ -39,10 +41,10 @@ var something = []dfc{
 		command: "removecommand", function: removeCommand, permission: botmoderator,
 	},
 	{
-		command: "prefix", function:prefix, permission: botmoderator,
+		command: "prefix", function: prefix, permission: botmoderator,
 	},
 	{
-		command: "customs", function:listCustoms, permission: botunknown,
+		command: "customs", function: listCustoms, permission: botunknown,
 	},
 }
 
@@ -66,13 +68,17 @@ func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (
 	}
 
 	command := splitString[0]
-	_, ok := servers[guildID].commands[command]
+	_, ok := servers[guildID].Commands[command]
 	if ok {
 		return fmt.Sprintf("Command \"%v\" already exists!", command), nil
 	}
 
-	servers[guildID].commands[command] = splitString[1]
-	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), nil
+	servers[guildID].Commands[command] = splitString[1]
+	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
+		"commands": map[string]string{command: splitString[1],
+		},
+	}, firestore.MergeAll)
+	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), err
 }
 
 func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
@@ -84,12 +90,12 @@ func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) 
 		return "syntax problem", nil
 	}
 	command := splitString[0]
-	_, ok := servers[guildID].commands[command]
+	_, ok := servers[guildID].Commands[command]
 	if !ok {
 		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
 	}
 
-	servers[guildID].commands[command] = splitString[1]
+	servers[guildID].Commands[command] = splitString[1]
 	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), nil
 
 }
@@ -104,14 +110,20 @@ func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string
 	}
 
 	command := splitString[0]
-	_, ok := servers[guildID].commands[command]
+	_, ok := servers[guildID].Commands[command]
 	if !ok {
 		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
 	}
 
-	delete(servers[guildID].commands, command)
+	delete(servers[guildID].Commands, command)
+	_, err := client.Collection("servers").Doc(guildID).Update(ctx, []firestore.Update{
+		{
+			Path: "commands." + command,
+			Value: firestore.Delete,
+		},
+	})
 
-	return fmt.Sprintf("Command \"%v\" successfully removed!", command), nil
+	return fmt.Sprintf("Command \"%v\" successfully removed!", command), err
 
 }
 
@@ -130,8 +142,11 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 		return "Prefix must be a single word", nil
 	}
 
-	servers[guildID].prefix = s
-	return "Prefix successfully updated", nil
+	servers[guildID].Prefix = s
+
+	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
+
+	return "Prefix successfully updated", err
 }
 
 func polo(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
@@ -142,11 +157,11 @@ func listCustoms(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 
 	var som strings.Builder
 
-	if len(servers[m.GuildID].commands) == 0 {
+	if len(servers[m.GuildID].Commands) == 0 {
 		return "", errors.New("server has no custom commands")
 	}
 
-	for i, v := range servers[m.GuildID].commands{
+	for i, v := range servers[m.GuildID].Commands {
 		fmt.Fprintf(&som, "Command: %v | Text: %v\n", i, v)
 	}
 
@@ -164,14 +179,13 @@ func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 
 	highestPermission := botuser
 	for _, v := range b.Roles {
-		if val, ok := servers[m.GuildID].roles[v]; ok {
-			if val > highestPermission {
-				highestPermission = val
+		if val, ok := servers[m.GuildID].Roles[v]; ok {
+			if int(val) > highestPermission {
+				highestPermission = int(val)
 			}
 		}
 	}
 
 	return highestPermission
-
 
 }
