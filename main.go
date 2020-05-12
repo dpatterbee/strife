@@ -122,10 +122,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	} else {
 		var ok bool
-		response, ok = currentServer.Commands[splitContent[0]]
-		if !ok {
-			response = "Command doesn't exist!"
-		}
+		response, _ = currentServer.Commands[splitContent[0]]
 	}
 
 	if response != "" {
