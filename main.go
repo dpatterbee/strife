@@ -22,8 +22,8 @@ func init() {
 	if token == "" {
 		reader := bufio.NewReader(os.Stdin)
 		d, _ := reader.ReadString('\n')
-		token = d[1 : len(d)-2]
 	}
+	token = token[1:len(token)-1]
 	servers = make(map[string]*server)
 	defaultCommands = makeDefaultCommands()
 
