@@ -22,8 +22,9 @@ func init() {
 	if token == "" {
 		reader := bufio.NewReader(os.Stdin)
 		d, _ := reader.ReadString('\n')
+		token = d
 	}
-	token = token[1:len(token)-1]
+	token = token[1:len(token)]
 	servers = make(map[string]*server)
 	defaultCommands = makeDefaultCommands()
 
@@ -67,6 +68,7 @@ func main() {
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
 
+	fmt.Println(token)
 	err = dg.Open()
 	if err != nil {
 		panic(err)
