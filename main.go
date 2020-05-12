@@ -121,7 +121,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			response = err.Error()
 		}
 	} else {
-		var ok bool
 		response, _ = currentServer.Commands[splitContent[0]]
 	}
 
