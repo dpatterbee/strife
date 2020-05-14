@@ -1,10 +1,9 @@
 package main
 
 import (
-	"cloud.google.com/go/firestore"
 	"context"
-	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"log"
 	"google.golang.org/api/iterator"
 )
 
@@ -13,12 +12,16 @@ type server struct {
 	Name     string            `firestore:"name"`
 	Prefix   string            `firestore:"prefix"`
 	Roles    map[string]int64  `firestore:"roles"`
+	ID       string            `firestore:"ID"`
 }
 
-func buildServerData(s *discordgo.Session, client *firestore.Client, ctx context.Context) map[string]*server {
+func buildServerData(s *discordgo.Session, ctx context.Context) map[string]*server {
 
 	svs := make(map[string]*server)
 
+	log.Println("Getting Server info from Database")
+
+	// Get server data from database
 	iter := client.Collection("servers").Documents(ctx)
 	for {
 		doc, err := iter.Next()
@@ -29,16 +32,28 @@ func buildServerData(s *discordgo.Session, client *firestore.Client, ctx context
 			panic(err)
 		}
 
-		var s server
-		err = doc.DataTo(&s)
+		var s2 server
+		err = doc.DataTo(&s2)
+		if err != nil {
+			log.Printf("%v", err)
+		}
+		svs[doc.Ref.ID] = &s2
+	}
+	log.Println("Updating server info from Discord")
+	// Update retrieved data with values which have changed since the database was last updated
+	for _, v := range svs {
+		guildID := v.ID
+		roles := getServerRoles(s, guildID)
+		_, err := updateServers(guildID, map[string]interface{}{
+			"roles": roles,
+		})
 		if err != nil {
 			panic(err)
 		}
-		svs[doc.Ref.ID] = &s
 	}
 
-	fmt.Println(svs)
-
+	log.Println("Creating newly found servers")
+	// Create new entries for servers which were not previously in the database
 	guilds, _ := s.UserGuilds(100, "", "")
 	for _, v := range guilds {
 		if _, ok := svs[v.ID]; !ok {
@@ -47,6 +62,7 @@ func buildServerData(s *discordgo.Session, client *firestore.Client, ctx context
 				Name:     v.Name,
 				Prefix:   "!",
 				Roles:    getServerRoles(s, v.ID),
+				ID : v.ID,
 			}
 			_, err := client.Collection("servers").Doc(v.ID).Set(ctx, *svs[v.ID])
 			if err != nil {
@@ -54,8 +70,6 @@ func buildServerData(s *discordgo.Session, client *firestore.Client, ctx context
 			}
 		}
 	}
-
-	fmt.Println(svs)
 
 	return svs
 

@@ -4,11 +4,10 @@ import (
 	"bufio"
 	"cloud.google.com/go/firestore"
 	"context"
-	firebase "firebase.google.com/go"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"google.golang.org/api/option"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,21 +16,18 @@ import (
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
-	flag.StringVar(&firebaseAuthFile, "f", "", "Firebase Auth File")
 	flag.Parse()
+	ctx = context.Background()
 	if token == "" {
 		reader := bufio.NewReader(os.Stdin)
 		d, _ := reader.ReadString('\n')
 		token = d
 	}
-	token = token[1:len(token)]
 	servers = make(map[string]*server)
 	defaultCommands = makeDefaultCommands()
-
 }
 
 var token string
-var firebaseAuthFile string
 var servers map[string]*server
 var defaultCommands map[string]dfc
 var client *firestore.Client
@@ -43,6 +39,7 @@ func main() {
 		return
 	}
 
+	log.Println("Creating discord session")
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		fmt.Println("Error creating Discord session: ", err)
@@ -50,29 +47,27 @@ func main() {
 	}
 	defer dg.Close()
 
-	ctx = context.Background()
-	sa := option.WithCredentialsFile(firebaseAuthFile)
-	app, err := firebase.NewApp(ctx, nil, sa)
+	projectID := "strife-bot-123"
+	log.Println("Creating Firestore client")
+	client, err = firestore.NewClient(ctx, projectID)
 	if err != nil {
 		panic(err)
 	}
 
-	client, err = app.Firestore(ctx)
-	if err != nil {
-		panic(err)
-	}
-	defer client.Close()
+	servers = buildServerData(dg, ctx)
 
-	servers = buildServerData(dg, client, ctx)
-
+	log.Println("Adding handlers to discord session")
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
+	dg.AddHandler(guildRoleCreate)
+	dg.AddHandler(guildRoleUpdate)
 
-	fmt.Println(token)
+	log.Println("Opening discord connection")
 	err = dg.Open()
 	if err != nil {
 		panic(err)
 	}
+	log.Println("Discord connection opened")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
@@ -84,6 +79,35 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 	err := s.UpdateStatus(0, "dev")
 	if err != nil {
 		fmt.Println(err)
+	}
+}
+
+func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
+	guildID := r.GuildID
+	servers[guildID].Roles = getServerRoles(s, guildID)
+	fmt.Println("popped")
+	data := map[string]interface{}{
+		"roles": servers[guildID].Roles,
+	}
+
+	_, err := updateServers(guildID, data)
+	if err != nil {
+		panic(err)
+	}
+
+}
+
+func guildRoleUpdate(s *discordgo.Session, r *discordgo.GuildRoleUpdate) {
+	guildID := r.GuildID
+	servers[guildID].Roles = getServerRoles(s, guildID)
+	fmt.Println("pooped")
+	data := map[string]interface{}{
+		"roles": servers[guildID].Roles,
+	}
+
+	_, err := updateServers(guildID, data)
+	if err != nil {
+		panic(err)
 	}
 }
 

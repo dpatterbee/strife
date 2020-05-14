@@ -7,5 +7,6 @@ require (
 	cloud.google.com/go/storage v1.7.0 // indirect
 	firebase.google.com/go v3.12.1+incompatible
 	github.com/bwmarrin/discordgo v0.20.3
+	github.com/google/martian v2.1.0+incompatible
 	google.golang.org/api v0.23.0
 )

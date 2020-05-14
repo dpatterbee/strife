@@ -1,3 +1,4 @@
 #/bin/sh
 
-./strife -t $(jq .key < $HOME/.config/strife-bot/config.json) -f discord-doot-5403dafaec0f.json
+go build
+./strife -t $(jq -r .key $HOME/.config/strife-bot/config.json)

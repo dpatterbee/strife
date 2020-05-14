@@ -75,8 +75,7 @@ func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (
 
 	servers[guildID].Commands[command] = splitString[1]
 	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
-		"commands": map[string]string{command: splitString[1],
-		},
+		"commands": map[string]string{command: splitString[1]},
 	}, firestore.MergeAll)
 	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), err
 }
@@ -96,7 +95,10 @@ func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) 
 	}
 
 	servers[guildID].Commands[command] = splitString[1]
-	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), nil
+	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
+		"commands": map[string]string{command: splitString[1]},
+	}, firestore.MergeAll)
+	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), err
 
 }
 
@@ -118,7 +120,7 @@ func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string
 	delete(servers[guildID].Commands, command)
 	_, err := client.Collection("servers").Doc(guildID).Update(ctx, []firestore.Update{
 		{
-			Path: "commands." + command,
+			Path:  "commands." + command,
 			Value: firestore.Delete,
 		},
 	})
