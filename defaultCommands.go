@@ -1,11 +1,12 @@
 package main
 
 import (
-	"cloud.google.com/go/firestore"
 	"errors"
 	"fmt"
-	"github.com/bwmarrin/discordgo"
 	"strings"
+
+	"cloud.google.com/go/firestore"
+	"github.com/bwmarrin/discordgo"
 )
 
 type dfc struct {

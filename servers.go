@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/bwmarrin/discordgo"
 	"log"
+
+	"github.com/bwmarrin/discordgo"
 	"google.golang.org/api/iterator"
 )
 
@@ -15,7 +16,7 @@ type server struct {
 	ID       string            `firestore:"ID"`
 }
 
-func buildServerData(s *discordgo.Session, ctx context.Context) map[string]*server {
+func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*server {
 
 	svs := make(map[string]*server)
 
@@ -62,7 +63,7 @@ func buildServerData(s *discordgo.Session, ctx context.Context) map[string]*serv
 				Name:     v.Name,
 				Prefix:   "!",
 				Roles:    getServerRoles(s, v.ID),
-				ID : v.ID,
+				ID:       v.ID,
 			}
 			_, err := client.Collection("servers").Doc(v.ID).Set(ctx, *svs[v.ID])
 			if err != nil {

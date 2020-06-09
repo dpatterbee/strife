@@ -2,16 +2,17 @@ package main
 
 import (
 	"bufio"
-	"cloud.google.com/go/firestore"
 	"context"
 	"flag"
 	"fmt"
-	"github.com/bwmarrin/discordgo"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"cloud.google.com/go/firestore"
+	"github.com/bwmarrin/discordgo"
 )
 
 func init() {
@@ -54,7 +55,7 @@ func main() {
 		panic(err)
 	}
 
-	servers = buildServerData(dg, ctx)
+	servers = buildServerData(ctx, dg)
 
 	log.Println("Adding handlers to discord session")
 	dg.AddHandler(ready)
