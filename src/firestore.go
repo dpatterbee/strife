@@ -1,4 +1,4 @@
-package main
+package strife
 
 import "cloud.google.com/go/firestore"
 
