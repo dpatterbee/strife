@@ -69,13 +69,13 @@ func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (
 	}
 
 	command := splitString[0]
-	_, ok := servers[guildID].Commands[command]
+	_, ok := bot.servers[guildID].Commands[command]
 	if ok {
 		return fmt.Sprintf("Command \"%v\" already exists!", command), nil
 	}
 
-	servers[guildID].Commands[command] = splitString[1]
-	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
+	bot.servers[guildID].Commands[command] = splitString[1]
+	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
 		"commands": map[string]string{command: splitString[1]},
 	}, firestore.MergeAll)
 	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), err
@@ -90,13 +90,13 @@ func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) 
 		return "syntax problem", nil
 	}
 	command := splitString[0]
-	_, ok := servers[guildID].Commands[command]
+	_, ok := bot.servers[guildID].Commands[command]
 	if !ok {
 		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
 	}
 
-	servers[guildID].Commands[command] = splitString[1]
-	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
+	bot.servers[guildID].Commands[command] = splitString[1]
+	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
 		"commands": map[string]string{command: splitString[1]},
 	}, firestore.MergeAll)
 	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), err
@@ -113,13 +113,13 @@ func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string
 	}
 
 	command := splitString[0]
-	_, ok := servers[guildID].Commands[command]
+	_, ok := bot.servers[guildID].Commands[command]
 	if !ok {
 		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
 	}
 
-	delete(servers[guildID].Commands, command)
-	_, err := client.Collection("servers").Doc(guildID).Update(ctx, []firestore.Update{
+	delete(bot.servers[guildID].Commands, command)
+	_, err := bot.client.Collection("servers").Doc(guildID).Update(ctx, []firestore.Update{
 		{
 			Path:  "commands." + command,
 			Value: firestore.Delete,
@@ -145,9 +145,9 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 		return "Prefix must be a single word", nil
 	}
 
-	servers[guildID].Prefix = s
+	bot.servers[guildID].Prefix = s
 
-	_, err := client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
+	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
 
 	return "Prefix successfully updated", err
 }
@@ -160,11 +160,11 @@ func listCustoms(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 
 	var som strings.Builder
 
-	if len(servers[m.GuildID].Commands) == 0 {
+	if len(bot.servers[m.GuildID].Commands) == 0 {
 		return "", errors.New("server has no custom commands")
 	}
 
-	for i, v := range servers[m.GuildID].Commands {
+	for i, v := range bot.servers[m.GuildID].Commands {
 		fmt.Fprintf(&som, "Command: %v | Text: %v\n", i, v)
 	}
 
@@ -172,7 +172,7 @@ func listCustoms(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 }
 
 func isDefaultCommand(s string) bool {
-	_, ok := defaultCommands[s]
+	_, ok := bot.defaultCommands[s]
 	return ok
 }
 
@@ -182,7 +182,7 @@ func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 
 	highestPermission := botuser
 	for _, v := range b.Roles {
-		if val, ok := servers[m.GuildID].Roles[v]; ok {
+		if val, ok := bot.servers[m.GuildID].Roles[v]; ok {
 			if int(val) > highestPermission {
 				highestPermission = int(val)
 			}

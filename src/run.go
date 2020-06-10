@@ -2,6 +2,7 @@ package strife
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,9 +15,14 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-var servers map[string]*server
-var defaultCommands map[string]dfc
-var client *firestore.Client
+type strifeBot struct {
+	servers         map[string]*server
+	defaultCommands map[string]dfc
+	client          *firestore.Client
+	session         *discordgo.Session
+}
+
+var bot strifeBot
 var ctx context.Context
 
 // Run starts strife
@@ -24,42 +30,35 @@ func Run(args []string) int {
 
 	ctx = context.Background()
 
-	// Create Discord client
-	dg, err := botFromArgs(args)
+	// Create bot discord session and firestore client
+	err := bot.fromArgs(args)
 	if err != nil {
-		log.Println("Error creating Discord session: ", err)
+		log.Println("Setup Error:", err)
 		return 1
 	}
-	defer dg.Close()
-
-	// Create Firestore Client
-
-	projectID := "strife-bot-123"
-	log.Println("Creating Firestore client")
-	client, err = firestore.NewClient(ctx, projectID)
-	if err != nil {
-		log.Println("Error creating Firestore Client", err)
-		return 1
-	}
+	defer bot.close()
 
 	// Build commands and server map
-	servers = buildServerData(ctx, dg)
-	defaultCommands = makeDefaultCommands()
+	bot.servers = buildServerData(ctx, bot.session)
+	bot.defaultCommands = makeDefaultCommands()
 
 	// Add handlers to discord session
 	log.Println("Adding handlers to discord session")
-	dg.AddHandler(ready)
-	dg.AddHandler(messageCreate)
-	dg.AddHandler(guildRoleCreate)
-	dg.AddHandler(guildRoleUpdate)
+	bot.session.AddHandler(ready)
+	bot.session.AddHandler(messageCreate)
+	bot.session.AddHandler(guildRoleCreate)
+	bot.session.AddHandler(guildRoleUpdate)
 
 	// Open Discord connection
 	log.Println("Opening discord connection")
-	err = dg.Open()
+	err = bot.session.Open()
 	if err != nil {
-		panic(err)
+		log.Println("Error opening discord connection", err)
+		return 1
 	}
 	log.Println("Discord connection opened")
+
+	log.Println("Setup Complete")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
@@ -68,8 +67,47 @@ func Run(args []string) int {
 	return 0
 }
 
-func botFromArgs(args []string) (*discordgo.Session, error) {
+func (b *strifeBot) fromArgs(args []string) error {
+
+	fl := flag.NewFlagSet("strife", flag.ContinueOnError)
+
+	token := fl.String("t", "", "Discord Bot Token")
+	projectID := fl.String("p", "", "Firestore Project ID")
+
+	if err := fl.Parse(args); err != nil {
+		return err
+	}
+
+	if len(*token) == 0 {
+		return errors.New("No Discord token provided")
+	}
+
+	if len(*projectID) == 0 {
+		return errors.New("No Project ID provided")
+	}
+
 	log.Println("Creating Discord Session")
+	dg, err := discordgo.New("Bot " + *token)
+	if err != nil {
+		return fmt.Errorf("Error creating discord session: %v", err)
+	}
+	b.session = dg
+
+	log.Println("Creating Firestore Client")
+	client, err := firestore.NewClient(ctx, *projectID)
+	if err != nil {
+		return fmt.Errorf("Error creating Firestore Client: %v", err)
+	}
+	b.client = client
+
+	return nil
+}
+
+func (b *strifeBot) close() {
+	b.session.Close()
+}
+
+func botFromArgs(args []string) (*discordgo.Session, error) {
 	var token string
 	fl := flag.NewFlagSet("strife", flag.ContinueOnError)
 
@@ -100,10 +138,10 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 
 func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
 	guildID := r.GuildID
-	servers[guildID].Roles = getServerRoles(s, guildID)
-	fmt.Println("popped")
+	bot.servers[guildID].Roles = getServerRoles(s, guildID)
+
 	data := map[string]interface{}{
-		"roles": servers[guildID].Roles,
+		"roles": bot.servers[guildID].Roles,
 	}
 
 	_, err := updateServers(guildID, data)
@@ -115,10 +153,10 @@ func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
 
 func guildRoleUpdate(s *discordgo.Session, r *discordgo.GuildRoleUpdate) {
 	guildID := r.GuildID
-	servers[guildID].Roles = getServerRoles(s, guildID)
-	fmt.Println("pooped")
+	bot.servers[guildID].Roles = getServerRoles(s, guildID)
+
 	data := map[string]interface{}{
-		"roles": servers[guildID].Roles,
+		"roles": bot.servers[guildID].Roles,
 	}
 
 	_, err := updateServers(guildID, data)
@@ -133,7 +171,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	currentServer := servers[m.GuildID]
+	currentServer := bot.servers[m.GuildID]
 
 	if !strings.HasPrefix(m.Content, currentServer.Prefix) {
 		return
@@ -146,7 +184,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var response string
 
 	if isDefaultCommand(splitContent[0]) {
-		requestedCommand := defaultCommands[splitContent[0]]
+		requestedCommand := bot.defaultCommands[splitContent[0]]
 		var err error
 
 		neededPermission := requestedCommand.permission

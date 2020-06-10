@@ -23,7 +23,7 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 	log.Println("Getting Server info from Database")
 
 	// Get server data from database
-	iter := client.Collection("servers").Documents(ctx)
+	iter := bot.client.Collection("servers").Documents(ctx)
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
@@ -65,7 +65,7 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 				Roles:    getServerRoles(s, v.ID),
 				ID:       v.ID,
 			}
-			_, err := client.Collection("servers").Doc(v.ID).Set(ctx, *svs[v.ID])
+			_, err := bot.client.Collection("servers").Doc(v.ID).Set(ctx, *svs[v.ID])
 			if err != nil {
 				panic(err)
 			}
