@@ -3,10 +3,13 @@ package strife
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
+	"github.com/jonas747/dca"
 )
 
 type dfc struct {
@@ -16,11 +19,11 @@ type dfc struct {
 }
 
 const (
-	botunknown   = iota
-	botuser      = iota
-	botdj        = iota
-	botmoderator = iota
-	botadmin     = iota
+	botunknown = iota
+	botuser
+	botdj
+	botmoderator
+	botadmin
 )
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
@@ -47,6 +50,9 @@ var something = []dfc{
 	{
 		command: "customs", function: listCustoms, permission: botunknown,
 	},
+	{
+		command: "play", function: playSound, permission: botunknown,
+	},
 }
 
 func makeDefaultCommands() map[string]dfc {
@@ -57,6 +63,40 @@ func makeDefaultCommands() map[string]dfc {
 	}
 
 	return cmds
+}
+
+func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+	guildID := m.GuildID
+
+	sound := getSound(s)
+	defer sound.Cleanup()
+
+	channelID, err := getUserVoiceChannel(sess, m)
+	if err != nil {
+		return "", err
+	}
+
+	vc, err := sess.ChannelVoiceJoin(guildID, channelID, false, true)
+	if err != nil {
+		return "", err
+	}
+
+	time.Sleep(250 * time.Millisecond)
+
+	vc.Speaking(true)
+
+	done := make(chan error)
+	dca.NewStream(&sound, vc, done)
+	err = <-done
+	vc.Speaking(false)
+	time.Sleep(250 * time.Millisecond)
+	vc.Disconnect()
+
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+
+	return "", nil
 }
 
 func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
