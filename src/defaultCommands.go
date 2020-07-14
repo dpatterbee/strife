@@ -98,7 +98,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 		return "", err
 	}
 
-	return "", nil
+	return "yee hwa", nil
 }
 
 func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {

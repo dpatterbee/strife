@@ -44,7 +44,7 @@ func getUserVoiceChannel(sess *discordgo.Session, m *discordgo.MessageCreate) (s
 
 	userID := m.Author.ID
 
-	guild, err := sess.Guild(m.GuildID)
+	guild, err := sess.State.Guild(m.GuildID)
 	if err != nil {
 		return "", err
 	}
@@ -55,6 +55,6 @@ func getUserVoiceChannel(sess *discordgo.Session, m *discordgo.MessageCreate) (s
 		}
 	}
 
-	return "", fmt.Errorf("User not found in guild")
+	return "", fmt.Errorf("User not in voice channel")
 
 }
