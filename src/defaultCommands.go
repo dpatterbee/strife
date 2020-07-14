@@ -67,6 +67,7 @@ func makeDefaultCommands() map[string]dfc {
 }
 
 func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+	log.Println("setting up sound")
 	guildID := m.GuildID
 
 	sound := getSound(s)
@@ -87,7 +88,6 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	vc.Speaking(true)
 
 	done := make(chan error)
-	log.Println("setting up sound")
 	dca.NewStream(&sound, vc, done)
 	err = <-done
 	vc.Speaking(false)
