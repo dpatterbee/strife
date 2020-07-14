@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 
@@ -86,6 +87,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	vc.Speaking(true)
 
 	done := make(chan error)
+	log.Println("setting up sound")
 	dca.NewStream(&sound, vc, done)
 	err = <-done
 	vc.Speaking(false)
