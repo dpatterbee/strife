@@ -73,6 +73,9 @@ func soundHandler(guildID, channelID string) {
 		log.Println(err)
 		return
 	}
+	currentGuild.Lock()
+	currentGuild.songPlayingChannel = channelID
+	currentGuild.Unlock()
 
 	for len(currentGuild.songQueue) > 0 {
 		currentGuild.Lock()
@@ -86,12 +89,22 @@ func soundHandler(guildID, channelID string) {
 
 		done := make(chan error)
 
-		dca.NewStream(sound, vc, done)
+		streamingSession := dca.NewStream(sound, vc, done)
 
-		err := <-done
+		currentGuild.Lock()
+		currentGuild.streamingSession = streamingSession
+		currentGuild.Unlock()
+
+		log.Println("started stream")
+		err = <-done
+		log.Println("finished song")
 		if err != nil {
 			log.Println(err)
 		}
+
+		currentGuild.Lock()
+		currentGuild.streamingSession = nil
+		currentGuild.Unlock()
 
 		sound.Cleanup()
 	}

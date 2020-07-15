@@ -51,6 +51,9 @@ var something = []dfc{
 	{
 		command: "play", function: playSound, permission: botunknown,
 	},
+	{
+		command: "pause", function: pauseSound, permission: botunknown,
+	},
 }
 
 func makeDefaultCommands() map[string]dfc {
@@ -228,5 +231,28 @@ func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 	}
 
 	return highestPermission
+
+}
+
+func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userID, guildID := m.Author.ID, m.GuildID
+	currentGuild := bot.servers[guildID]
+
+	userChannel, err := getUserVoiceChannel(s, userID, guildID)
+	if err != nil {
+		return "", err
+	}
+
+	if userChannel != currentGuild.songPlayingChannel {
+		return "You must be in the same voice channel as the bot to pause music", nil
+	}
+
+	currentGuild.Lock()
+	songSession := currentGuild.streamingSession
+	songSession.SetPaused(true)
+	currentGuild.Unlock()
+
+	return "Song paused", nil
 
 }

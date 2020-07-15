@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/jonas747/dca"
 	"google.golang.org/api/iterator"
 )
 
@@ -18,14 +19,16 @@ type serverl struct {
 }
 
 type server struct {
-	Commands       map[string]string
-	Name           string
-	Prefix         string
-	Roles          map[string]int64
-	ID             string
-	songQueue      []songURL
-	songPlaying    bool
-	playingChannel string
+	Commands           map[string]string
+	Name               string
+	Prefix             string
+	Roles              map[string]int64
+	ID                 string
+	songQueue          []songURL
+	songPlaying        bool
+	songPlayingChannel string
+	playingChannel     string
+	streamingSession   *dca.StreamingSession
 	sync.Mutex
 }
 
