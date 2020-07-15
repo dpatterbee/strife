@@ -57,6 +57,9 @@ var something = []dfc{
 	{
 		command: "resume", function: resumeSound, permission: botunknown,
 	},
+	{
+		command: "skip", function: skipSound, permission: botunknown,
+	},
 }
 
 func makeDefaultCommands() map[string]dfc {
