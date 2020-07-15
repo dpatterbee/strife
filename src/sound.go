@@ -118,5 +118,7 @@ func soundHandler(guildID, channelID string) {
 
 	currentGuild.Lock()
 	currentGuild.songPlaying = false
+	currentGuild.songPlayingChannel = ""
+	currentGuild.streamingSession = nil
 	currentGuild.Unlock()
 }

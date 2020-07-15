@@ -85,7 +85,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	currentGuild.Lock()
 	if currentGuild.songPlaying {
 		log.Println("Song already playing, adding to queue")
-		if userChannel != currentGuild.playingChannel {
+		if userChannel != currentGuild.songPlayingChannel {
 			currentGuild.Unlock()
 			return "You must be in the same voice channel as the music bot to request a song", nil
 		}
