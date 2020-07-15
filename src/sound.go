@@ -89,18 +89,21 @@ func soundHandler(guildID, channelID string) {
 
 			done := make(chan error)
 
+			log.Println("started stream")
 			streamingSession := dca.NewStream(sound, vc, done)
 
 			currentGuild.Lock()
 			currentGuild.streamingSession = streamingSession
 			currentGuild.Unlock()
 
-			log.Println("started stream")
 			var someshit error
+
 			var bool bool
 			for {
+				time.Sleep(1 * time.Second)
 				if bool, someshit = streamingSession.Finished(); !bool {
 					someshit = fmt.Errorf("End of song")
+					err = <-done
 					break
 				}
 
@@ -108,14 +111,15 @@ func soundHandler(guildID, channelID string) {
 				case <-currentGuild.songStopper:
 					sound.Stop()
 					someshit = fmt.Errorf("User interrupt")
+					err = <-done
+					break
 				default:
 					// Don't block
 				}
 				log.Println("Song playing...")
 
-				time.Sleep(1 * time.Second)
 			}
-			log.Println("finished song; reason:", someshit)
+			log.Println("finished song; reason:", someshit, err)
 
 			currentGuild.Lock()
 			currentGuild.streamingSession = nil
