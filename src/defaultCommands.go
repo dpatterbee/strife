@@ -93,6 +93,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 		currentGuild.Unlock()
 		return "Song added to queue", nil
 	}
+	currentGuild.songQueue = append(currentGuild.songQueue, url)
 	currentGuild.songPlaying = true
 	currentGuild.Unlock()
 
