@@ -242,6 +242,13 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 	userID, guildID := m.Author.ID, m.GuildID
 	currentGuild := bot.servers[guildID]
 
+	currentGuild.Lock()
+	if !currentGuild.songPlaying {
+		currentGuild.Unlock()
+		return "No music playing", nil
+	}
+	currentGuild.Unlock()
+
 	userChannel, err := getUserVoiceChannel(s, userID, guildID)
 	if err != nil {
 		return "", err
@@ -253,9 +260,39 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 
 	currentGuild.Lock()
 	songSession := currentGuild.streamingSession
+	if songSession.Paused() {
+		currentGuild.Unlock()
+		return "Song is already paused", nil
+	}
 	songSession.SetPaused(true)
 	currentGuild.Unlock()
 
 	return "Song paused", nil
 
+}
+
+func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userID, guildID := m.Author.ID, m.GuildID
+	currentGuild := bot.servers[guildID]
+
+	userChannel, err := getUserVoiceChannel(s, userID, guildID)
+	if err != nil {
+		return "", err
+	}
+
+	if userChannel != currentGuild.songPlayingChannel {
+		return "You must be in the same voice channel as the bot to resume music", nil
+	}
+
+	currentGuild.Lock()
+	songSession := currentGuild.streamingSession
+	if !songSession.Paused() {
+		currentGuild.Unlock()
+		return "Song is already playing", nil
+	}
+	songSession.SetPaused(false)
+	currentGuild.Unlock()
+
+	return "Song paused", nil
 }
