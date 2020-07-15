@@ -191,7 +191,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		commandFunc := requestedCommand.function
 
 		if userPermissionLevel(s, m) >= neededPermission {
-			fmt.Println(userPermissionLevel(s, m), neededPermission)
 			response, err = commandFunc(s, m, content)
 		} else {
 			response = "Invalid Permission level"
@@ -205,11 +204,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if response != "" {
-		test, err := s.ChannelMessageSend(m.ChannelID, response)
+		message, err := s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(test)
+		log.Println(message.ContentWithMentionsReplaced(), message.Author, message.ChannelID, message.GuildID)
 	}
 
 }
