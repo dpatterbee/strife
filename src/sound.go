@@ -101,17 +101,19 @@ func soundHandler(guildID, channelID string) {
 			var bool bool
 			for {
 				time.Sleep(1 * time.Second)
-				if bool, someshit = streamingSession.Finished(); !bool {
-					someshit = fmt.Errorf("End of song")
-					err = <-done
-					break
-				}
+				// if bool, someshit = streamingSession.Finished(); !bool {
+				// 	someshit = fmt.Errorf("End of song")
+				// 	err = <-done
+				// 	break
+				// }
+
+				err = <-done
 
 				select {
 				case <-currentGuild.songStopper:
 					sound.Stop()
 					someshit = fmt.Errorf("User interrupt")
-					err = <-done
+					// err = <-done
 					break
 				default:
 					// Don't block
