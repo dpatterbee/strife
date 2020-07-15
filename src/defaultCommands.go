@@ -331,7 +331,8 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 	}
 
 	currentGuild.Lock()
-	songSession := currentGuild.streamingSession
+
+	currentGuild.songStopper <- true
 
 	currentGuild.Unlock()
 
