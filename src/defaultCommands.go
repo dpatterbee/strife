@@ -54,6 +54,9 @@ var something = []dfc{
 	{
 		command: "pause", function: pauseSound, permission: botunknown,
 	},
+	{
+		command: "resume", function: resumeSound, permission: botunknown,
+	},
 }
 
 func makeDefaultCommands() map[string]dfc {
@@ -90,11 +93,13 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 			return "You must be in the same voice channel as the music bot to request a song", nil
 		}
 		currentGuild.songQueue = append(currentGuild.songQueue, url)
+		log.Println("Queue length:", len(currentGuild.songQueue))
 		currentGuild.Unlock()
 		return "Song added to queue", nil
 	}
 	currentGuild.songQueue = append(currentGuild.songQueue, url)
 	currentGuild.songPlaying = true
+	log.Println("Queue length:", len(currentGuild.songQueue))
 	currentGuild.Unlock()
 
 	log.Println("Soundhandler not active, activating")
