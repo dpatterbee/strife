@@ -27,6 +27,7 @@ type server struct {
 	songQueue          []songURL
 	songPlaying        bool
 	songPlayingChannel string
+	songStopper        chan bool
 	streamingSession   *dca.StreamingSession
 	sync.Mutex
 }

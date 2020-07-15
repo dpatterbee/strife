@@ -281,6 +281,13 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 	userID, guildID := m.Author.ID, m.GuildID
 	currentGuild := bot.servers[guildID]
 
+	currentGuild.Lock()
+	if !currentGuild.songPlaying {
+		currentGuild.Unlock()
+		return "No music playing", nil
+	}
+	currentGuild.Unlock()
+
 	userChannel, err := getUserVoiceChannel(s, userID, guildID)
 	if err != nil {
 		return "", err
@@ -300,4 +307,34 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 	currentGuild.Unlock()
 
 	return "Song paused", nil
+}
+
+func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userID, guildID := m.Author.ID, m.GuildID
+	currentGuild := bot.servers[guildID]
+
+	currentGuild.Lock()
+	if !currentGuild.songPlaying {
+		currentGuild.Unlock()
+		return "No music playing", nil
+	}
+	currentGuild.Unlock()
+
+	userChannel, err := getUserVoiceChannel(s, userID, guildID)
+	if err != nil {
+		return "", err
+	}
+
+	if userChannel != currentGuild.songPlayingChannel {
+		return "You must be in the same voice channel as the bot to skip songs", nil
+	}
+
+	currentGuild.Lock()
+	songSession := currentGuild.streamingSession
+
+	currentGuild.Unlock()
+
+	return "Song paused", nil
+
 }
