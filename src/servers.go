@@ -3,12 +3,13 @@ package strife
 import (
 	"context"
 	"log"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"google.golang.org/api/iterator"
 )
 
-type server struct {
+type serverl struct {
 	Commands map[string]string `firestore:"commands"`
 	Name     string            `firestore:"name"`
 	Prefix   string            `firestore:"prefix"`
@@ -16,9 +17,21 @@ type server struct {
 	ID       string            `firestore:"ID"`
 }
 
+type server struct {
+	Commands       map[string]string
+	Name           string
+	Prefix         string
+	Roles          map[string]int64
+	ID             string
+	songQueue      []songURL
+	songPlaying    bool
+	playingChannel string
+	sync.Mutex
+}
+
 func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*server {
 
-	svs := make(map[string]*server)
+	svs := make(map[string]*serverl)
 
 	log.Println("Getting Server info from Database")
 
@@ -33,7 +46,7 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 			panic(err)
 		}
 
-		var s2 server
+		var s2 serverl
 		err = doc.DataTo(&s2)
 		if err != nil {
 			log.Printf("%v", err)
@@ -58,7 +71,7 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 	guilds, _ := s.UserGuilds(100, "", "")
 	for _, v := range guilds {
 		if _, ok := svs[v.ID]; !ok {
-			svs[v.ID] = &server{
+			svs[v.ID] = &serverl{
 				Commands: make(map[string]string),
 				Name:     v.Name,
 				Prefix:   "!",
@@ -72,6 +85,18 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 		}
 	}
 
-	return svs
+	sss := make(map[string]*server)
+
+	for i, v := range svs {
+		sss[i] = &server{
+			Commands: v.Commands,
+			Name:     v.Name,
+			Prefix:   v.Prefix,
+			Roles:    v.Roles,
+			ID:       v.ID,
+		}
+	}
+
+	return sss
 
 }

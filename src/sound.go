@@ -3,11 +3,29 @@ package strife
 import (
 	"bytes"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
 	"github.com/rylio/ytdl"
 )
+
+type songURL struct {
+	location  string
+	url       string
+	requester string
+}
+
+func parseURL(m *discordgo.MessageCreate, s string) (songURL, error) {
+	var loc songURL
+
+	loc.url = s
+	loc.location = "youtube"
+	loc.requester = m.Author.ID
+
+	return loc, nil
+}
 
 func getSound(s string) *dca.EncodeSession {
 
@@ -30,11 +48,9 @@ func getSound(s string) *dca.EncodeSession {
 	return encodeSess
 }
 
-func getUserVoiceChannel(sess *discordgo.Session, m *discordgo.MessageCreate) (string, error) {
+func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (string, error) {
 
-	userID := m.Author.ID
-
-	guild, err := sess.State.Guild(m.GuildID)
+	guild, err := sess.State.Guild(guildID)
 	if err != nil {
 		return "", err
 	}
@@ -47,4 +63,46 @@ func getUserVoiceChannel(sess *discordgo.Session, m *discordgo.MessageCreate) (s
 
 	return "", fmt.Errorf("User not in voice channel")
 
+}
+
+func soundHandler(guildID, channelID string) {
+	currentGuild := bot.servers[guildID]
+
+	vc, err := bot.session.ChannelVoiceJoin(guildID, channelID, false, true)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	for len(currentGuild.songQueue) > 0 {
+		currentGuild.Lock()
+		var currentSong songURL
+		currentSong, currentGuild.songQueue = currentGuild.songQueue[0], currentGuild.songQueue[1:]
+		currentGuild.Unlock()
+
+		sound := getSound(currentSong.url)
+
+		vc.Speaking(true)
+
+		done := make(chan error)
+
+		dca.NewStream(sound, vc, done)
+
+		err := <-done
+		if err != nil {
+			log.Println(err)
+		}
+
+		sound.Cleanup()
+	}
+
+	vc.Speaking(false)
+
+	time.Sleep(10 * time.Second)
+
+	vc.Disconnect()
+
+	currentGuild.Lock()
+	currentGuild.songPlaying = false
+	currentGuild.Unlock()
 }

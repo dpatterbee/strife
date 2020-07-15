@@ -3,14 +3,11 @@ package strife
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/dca"
 )
 
 type dfc struct {
@@ -70,39 +67,34 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	log.Println("setting up sound")
 	guildID := m.GuildID
 
-	sound := getSound(s)
-	defer sound.Cleanup()
+	currentGuild := bot.servers[guildID]
 
-	channelID, err := getUserVoiceChannel(sess, m)
+	url, err := parseURL(m, s)
 	if err != nil {
 		return "", err
 	}
 
-	vc, err := sess.ChannelVoiceJoin(guildID, channelID, false, true)
+	userChannel, err := getUserVoiceChannel(sess, url.requester, guildID)
 	if err != nil {
-		return "", err
+		return "You must be in a voice channel to request a song", nil
 	}
 
-	time.Sleep(250 * time.Millisecond)
-
-	vc.Speaking(true)
-
-	done := make(chan error)
-
-	dca.NewStream(sound, vc, done)
-
-	err = <-done
-
-	vc.Speaking(false)
-
-	time.Sleep(10 * time.Second)
-	vc.Disconnect()
-
-	if err != nil && err != io.EOF {
-		return "", err
+	currentGuild.Lock()
+	if currentGuild.songPlaying {
+		if userChannel != currentGuild.playingChannel {
+			currentGuild.Unlock()
+			return "You must be in the same voice channel as the music bot to request a song", nil
+		}
+		currentGuild.songQueue = append(currentGuild.songQueue, url)
+		currentGuild.Unlock()
+		return "Song added to queue", nil
 	}
+	currentGuild.songPlaying = true
+	currentGuild.Unlock()
 
-	return "", nil
+	go soundHandler(guildID, userChannel)
+
+	return "Song added to queue", nil
 }
 
 func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
