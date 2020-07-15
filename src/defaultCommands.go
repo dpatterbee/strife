@@ -88,17 +88,21 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	vc.Speaking(true)
 
 	done := make(chan error)
-	dca.NewStream(&sound, vc, done)
+
+	dca.NewStream(sound, vc, done)
+
 	err = <-done
+
 	vc.Speaking(false)
-	time.Sleep(250 * time.Millisecond)
+
+	time.Sleep(10 * time.Second)
 	vc.Disconnect()
 
 	if err != nil && err != io.EOF {
 		return "", err
 	}
 
-	return "yee hwa", nil
+	return "", nil
 }
 
 func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
