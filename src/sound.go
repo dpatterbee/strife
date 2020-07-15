@@ -77,6 +77,7 @@ func soundHandler(guildID, channelID string) {
 	currentGuild.songPlayingChannel = channelID
 	currentGuild.Unlock()
 
+	log.Println("Songqueue length =", len(currentGuild.songQueue))
 	for len(currentGuild.songQueue) > 0 {
 		currentGuild.Lock()
 		var currentSong songURL
