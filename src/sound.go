@@ -101,6 +101,7 @@ func soundHandler(guildID, channelID string) {
 			// var bool bool
 		Loop:
 			for {
+				log.Println("Song playing...")
 				time.Sleep(1 * time.Second)
 				// if bool, someshit = streamingSession.Finished(); !bool {
 				// 	someshit = fmt.Errorf("End of song")
@@ -119,7 +120,6 @@ func soundHandler(guildID, channelID string) {
 				default:
 					// Don't block
 				}
-				log.Println("Song playing...")
 
 			}
 			log.Println("finished song; reason:", someshit, err)
