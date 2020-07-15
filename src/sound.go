@@ -98,9 +98,9 @@ func soundHandler(guildID, channelID string) {
 			log.Println("started stream")
 			var someshit error
 			var bool bool
-			sound.Stop()
 			for {
 				if bool, someshit = streamingSession.Finished(); !bool {
+					someshit = fmt.Errorf("End of song")
 					break
 				}
 
@@ -111,6 +111,7 @@ func soundHandler(guildID, channelID string) {
 				default:
 					// Don't block
 				}
+				log.Println("Song playing...")
 
 				time.Sleep(1 * time.Second)
 			}
