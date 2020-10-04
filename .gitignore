@@ -1,4 +1,4 @@
 .idea
 *.exe
 strife
-*.json
+creds.yml

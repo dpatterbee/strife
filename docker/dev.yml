@@ -1,0 +1,7 @@
+version: "3.8"
+services:
+    app:
+        image: strife-app
+        command: ./strife
+        volumes: 
+            - ~/.config/gcloud:/root/.config/gcloud
