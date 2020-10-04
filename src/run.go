@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
+	"gopkg.in/yaml.v2"
 )
 
 type strifeBot struct {
@@ -74,16 +76,45 @@ func (b *strifeBot) fromArgs(args []string) error {
 	token := fl.String("t", "", "Discord Bot Token")
 	projectID := fl.String("p", "", "Firestore Project ID")
 
+	tod := struct {
+		Token string
+		ID    string
+	}{}
+
+	dat, err := ioutil.ReadFile("creds.yml")
+	if err != nil {
+		return err
+	}
+
+	err = yaml.Unmarshal(dat, &tod)
+	if err != nil {
+		return err
+	}
+
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
 
 	if len(*token) == 0 {
-		return errors.New("No Discord token provided")
+		tok := os.Getenv("DISCORD_TOKEN")
+		if tok == "" {
+			tok = tod.Token
+			if tok == "" {
+				return errors.New("No Discord token provided")
+			}
+		}
+		token = &tok
 	}
 
 	if len(*projectID) == 0 {
-		return errors.New("No Project ID provided")
+		proji := os.Getenv("PROJECT_ID")
+		if proji == "" {
+			proji = tod.ID
+			if proji == "" {
+				return errors.New("No Project ID provided")
+			}
+		}
+		projectID = &proji
 	}
 
 	log.Println("Creating Discord Session")
