@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/Andreychik32/ytdl"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
-	"github.com/rylio/ytdl"
 )
 
 func getSound(s string) *dca.EncodeSession {
