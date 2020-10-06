@@ -6,5 +6,5 @@ dev:
 	@docker-compose up --build
 live:
 	@touch creds.yml
-	@docker build -t strife-app --target bin .
+	@docker build -t strife-app --target bin /strife
 	@docker run strife-app
