@@ -4,7 +4,7 @@ WORKDIR /go/src/strife
 
 COPY go.mod go.sum ./
 RUN go mod download -x
-COPY . .
+COPY . ./
 RUN go build -v -o /out/strife .
 
 FROM alpine AS bin

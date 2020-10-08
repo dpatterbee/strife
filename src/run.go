@@ -44,8 +44,8 @@ func Run(args []string) int {
 	bot.servers = buildServerData(ctx, bot.session)
 	bot.defaultCommands = makeDefaultCommands()
 
-	// Add handlers to discord session
-	log.Println("Adding handlers to discord session")
+	// Add event handlers to discordgo session https://discord.com/developers/docs/topics/gateway#commands-and-events-gateway-events
+	log.Println("Adding event handlers to discordgo session")
 	bot.session.AddHandler(ready)
 	bot.session.AddHandler(messageCreate)
 	bot.session.AddHandler(guildRoleCreate)
@@ -136,28 +136,6 @@ func (b *strifeBot) fromArgs(args []string) error {
 
 func (b *strifeBot) close() {
 	b.session.Close()
-}
-
-func botFromArgs(args []string) (*discordgo.Session, error) {
-	var token string
-	fl := flag.NewFlagSet("strife", flag.ContinueOnError)
-
-	fl.StringVar(&token, "t", "", "Bot Token")
-
-	if err := fl.Parse(args); err != nil {
-		return nil, err
-	}
-
-	if len(token) == 0 {
-		return nil, fmt.Errorf("No token provided")
-	}
-
-	dg, err := discordgo.New("Bot " + token)
-	if err != nil {
-		return nil, err
-	}
-
-	return dg, nil
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
