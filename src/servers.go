@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/dca"
 	"google.golang.org/api/iterator"
 )
 
@@ -28,7 +27,7 @@ type server struct {
 	songPlaying        bool
 	songPlayingChannel string
 	songStopper        chan bool
-	streamingSession   *dca.StreamingSession
+	streamingSession   *streamSession
 	sync.Mutex
 }
 

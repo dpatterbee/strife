@@ -1,12 +1,12 @@
 package strife
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"log"
+	"os/exec"
 	"time"
 
-	"github.com/Andreychik32/ytdl"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
 )
@@ -27,25 +27,41 @@ func parseURL(m *discordgo.MessageCreate, s string) (songURL, error) {
 	return loc, nil
 }
 
-func getSound(s string) *dca.EncodeSession {
-
-	client := ytdl.DefaultClient
-
-	videoInfo, err := client.GetVideoInfo(ctx, s)
-	if err != nil {
-		panic(err)
+// streamSong uses youtube-dl to download the song and pipe the stream of data to w
+func streamSong(w *io.PipeWriter, s string) {
+	ytdlArgs := []string{
+		"-o", "-",
 	}
 
-	var video bytes.Buffer
+	ytdlArgs = append(ytdlArgs, s)
 
-	err = client.Download(ctx, videoInfo, videoInfo.Formats[0], &video)
+	ytdl := exec.Command("youtube-dl", ytdlArgs...)
+
+	ytdl.Stdout = w
+
+	err := ytdl.Start()
 	if err != nil {
-		panic(err)
+		log.Println(err)
 	}
 
-	encodeSess, err := dca.EncodeMem(&video, dca.StdEncodeOptions)
+	err = ytdl.Wait()
+	if err != nil {
+		log.Println(err)
+	}
+}
 
-	return encodeSess
+func makeSongSession(s string) (*dca.EncodeSession, error) {
+
+	r, w := io.Pipe()
+
+	go streamSong(w, s)
+
+	ss, err := dca.EncodeMem(r, dca.StdEncodeOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return ss, nil
 }
 
 func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (string, error) {
@@ -65,6 +81,8 @@ func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (strin
 
 }
 
+// soundHandler runs while a server has a queue of songs to be played.
+// It loops over the queue of songs and plays them in order, exiting once it has drained the list
 func soundHandler(guildID, channelID string) {
 	currentGuild := bot.servers[guildID]
 
@@ -83,52 +101,35 @@ func soundHandler(guildID, channelID string) {
 			currentSong, currentGuild.songQueue = currentGuild.songQueue[0], currentGuild.songQueue[1:]
 			currentGuild.Unlock()
 
-			sound := getSound(currentSong.url)
+			sound, err := makeSongSession(currentSong.url)
+			if err != nil {
+				log.Println(err)
+				break
+			}
 
 			vc.Speaking(true)
 
 			done := make(chan error)
 
 			log.Println("started stream")
-			streamingSession := dca.NewStream(sound, vc, done)
 
+			streamingSession := newStream(sound, vc)
 			currentGuild.Lock()
 			currentGuild.streamingSession = streamingSession
 			currentGuild.Unlock()
 
-			var someshit error
-
-			// var bool bool
-		Loop:
-			for {
-				log.Println("Song playing...")
-				time.Sleep(1 * time.Second)
-				// if bool, someshit = streamingSession.Finished(); !bool {
-				// 	someshit = fmt.Errorf("End of song")
-				// 	err = <-done
-				// 	break
-				// }
-
-				select {
-				case <-currentGuild.songStopper:
-					sound.Stop()
-					someshit = fmt.Errorf("User interrupt")
-					// err = <-done
-					break Loop
-				case err = <-done:
-					break Loop
-				default:
-					// Don't block
-				}
-
+			select {
+			case <-currentGuild.songStopper:
+				err = fmt.Errorf("User interrupt")
+			case err = <-done:
 			}
-			log.Println("finished song; reason:", someshit, err)
+			log.Println("finished song; reason: ", err)
 
 			currentGuild.Lock()
 			currentGuild.streamingSession = nil
 			currentGuild.Unlock()
-
 			sound.Cleanup()
+
 			currentGuild.Lock()
 		}
 		vc.Speaking(false)

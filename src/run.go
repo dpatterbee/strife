@@ -51,6 +51,8 @@ func Run(args []string) int {
 	bot.session.AddHandler(guildRoleCreate)
 	bot.session.AddHandler(guildRoleUpdate)
 
+	bot.session.Identify.Intents = nil
+
 	// Open Discord connection
 	log.Println("Opening discord connection")
 	err = bot.session.Open()
@@ -81,7 +83,7 @@ func (b *strifeBot) fromArgs(args []string) error {
 		ID    string
 	}{}
 
-	dat, err := ioutil.ReadFile("creds.yml")
+	dat, err := ioutil.ReadFile("./creds.yml")
 	if err != nil {
 		return err
 	}

@@ -197,6 +197,10 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 		return "Prefix must be a single word", nil
 	}
 
+	if len(s) > 10 {
+		return "Prefix must be 10 or fewer characters", nil
+	}
+
 	bot.servers[guildID].Prefix = s
 
 	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
@@ -266,14 +270,7 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 		return "You must be in the same voice channel as the bot to pause music", nil
 	}
 
-	currentGuild.Lock()
-	songSession := currentGuild.streamingSession
-	if songSession.Paused() {
-		currentGuild.Unlock()
-		return "Song is already paused", nil
-	}
-	songSession.SetPaused(true)
-	currentGuild.Unlock()
+	currentGuild.streamingSession.Pause()
 
 	return "Song paused", nil
 
@@ -300,16 +297,9 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 		return "You must be in the same voice channel as the bot to resume music", nil
 	}
 
-	currentGuild.Lock()
-	songSession := currentGuild.streamingSession
-	if !songSession.Paused() {
-		currentGuild.Unlock()
-		return "Song is already playing", nil
-	}
-	songSession.SetPaused(false)
-	currentGuild.Unlock()
+	currentGuild.streamingSession.Resume()
 
-	return "Song paused", nil
+	return "Song resumed", nil
 }
 
 func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
@@ -333,12 +323,8 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 		return "You must be in the same voice channel as the bot to skip songs", nil
 	}
 
-	currentGuild.Lock()
+	currentGuild.streamingSession.Skip()
 
-	currentGuild.songStopper <- true
-
-	currentGuild.Unlock()
-
-	return "Song paused", nil
+	return "Song skipped", nil
 
 }
