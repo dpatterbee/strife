@@ -60,6 +60,9 @@ var something = []dfc{
 	{
 		command: "skip", function: skipSound, permission: botunknown,
 	},
+	{
+		command: "disconnect", function: disconnectVoice, permission: botunknown,
+	},
 }
 
 func makeDefaultCommands() map[string]dfc {
@@ -80,6 +83,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 
 	url, err := parseURL(m, s)
 	if err != nil {
+		// Add handling for non-url requests
 		return "", err
 	}
 
@@ -270,7 +274,7 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 		return "You must be in the same voice channel as the bot to pause music", nil
 	}
 
-	currentGuild.streamingSession.Pause()
+	currentGuild.mediaSessions.stream.Pause()
 
 	return "Song paused", nil
 
@@ -297,7 +301,7 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 		return "You must be in the same voice channel as the bot to resume music", nil
 	}
 
-	currentGuild.streamingSession.Resume()
+	currentGuild.mediaSessions.stream.Resume()
 
 	return "Song resumed", nil
 }
@@ -323,8 +327,35 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 		return "You must be in the same voice channel as the bot to skip songs", nil
 	}
 
-	currentGuild.streamingSession.Skip()
+	currentGuild.mediaSessions.stream.Skip()
 
 	return "Song skipped", nil
+
+}
+
+func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userID, guildID := m.Author.ID, m.GuildID
+	currentGuild := bot.servers[guildID]
+
+	currentGuild.Lock()
+	// if !currentGuild.inVC {
+	// 	currentGuild.Unlock()
+	// 	return "Not in vc", nil
+	// }
+	currentGuild.Unlock()
+
+	userChannel, err := getUserVoiceChannel(s, userID, guildID)
+	if err != nil {
+		return "", err
+	}
+
+	if userChannel != currentGuild.songPlayingChannel {
+		return "You must be in the same voice channel as the bot to make it leave", nil
+	}
+
+	currentGuild.mediaSessions.disconnect()
+
+	return "Bot gone", nil
 
 }

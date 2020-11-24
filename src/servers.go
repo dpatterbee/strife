@@ -25,9 +25,10 @@ type server struct {
 	ID                 string
 	songQueue          []songURL
 	songPlaying        bool
+	inVC               bool
 	songPlayingChannel string
 	songStopper        chan bool
-	streamingSession   *streamSession
+	mediaSessions      *mediaSession
 	sync.Mutex
 }
 
