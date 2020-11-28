@@ -18,18 +18,22 @@ type serverl struct {
 }
 
 type server struct {
-	Commands           map[string]string
-	Name               string
-	Prefix             string
-	Roles              map[string]int64
-	ID                 string
-	songQueue          []songURL
-	songPlaying        bool
-	inVC               bool
+	Commands    map[string]string
+	Name        string
+	Prefix      string
+	Roles       map[string]int64
+	ID          string
+	songQueue   chan songURL
+	mediaStatus mediaPlayingStatus
+	sync.RWMutex
+}
+
+type mediaPlayingStatus struct {
+	mediaControlChan   chan int
 	songPlayingChannel string
-	songStopper        chan bool
-	mediaSessions      *mediaSession
-	sync.Mutex
+	songPlaying        bool
+	songPaused         bool
+	sync.RWMutex
 }
 
 func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*server {
@@ -92,11 +96,12 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 
 	for i, v := range svs {
 		sss[i] = &server{
-			Commands: v.Commands,
-			Name:     v.Name,
-			Prefix:   v.Prefix,
-			Roles:    v.Roles,
-			ID:       v.ID,
+			Commands:  v.Commands,
+			Name:      v.Name,
+			Prefix:    v.Prefix,
+			Roles:     v.Roles,
+			ID:        v.ID,
+			songQueue: make(chan songURL, 100),
 		}
 	}
 

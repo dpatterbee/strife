@@ -24,7 +24,8 @@ type streamSession struct {
 	sync.RWMutex
 }
 
-func newStream(source dca.OpusReader, vc *discordgo.VoiceConnection) *streamSession {
+func newStreamingSession(source dca.OpusReader, vc *discordgo.VoiceConnection) *streamSession {
+
 	session := &streamSession{
 		vc:     vc,
 		source: source,
@@ -33,8 +34,11 @@ func newStream(source dca.OpusReader, vc *discordgo.VoiceConnection) *streamSess
 		skip:   make(chan bool),
 	}
 
-	go session.stream()
 	return session
+}
+
+func (s *streamSession) Start() {
+	go s.stream()
 }
 
 func (s *streamSession) stream() {

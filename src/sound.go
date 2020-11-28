@@ -10,10 +10,16 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
+)
+
+const (
+	pause = iota
+	resume
+	skip
+	disconnect
 )
 
 var (
@@ -35,9 +41,24 @@ type mediaSession struct {
 	sync.Mutex
 }
 
+type mediaCommandHolder struct {
+	command mediaCommand
+	result  chan error
+}
+
+type mediaCommand struct {
+	commandType int
+	commandData string
+}
+
 type downloadSession struct {
 	process *os.Process
 	sync.Mutex
+}
+
+func mediaController() {
+	// This function will run perpertually, awaiting requests to create mediaHandlers for different servers.
+	// It somehow returns a channel which is for mediaCommandHolders to be sent down.
 }
 
 func parseURL(m *discordgo.MessageCreate, s string) (songURL, error) {
@@ -131,84 +152,62 @@ func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (strin
 
 // soundHandler runs while a server has a queue of songs to be played.
 // It loops over the queue of songs and plays them in order, exiting once it has drained the list
-func soundHandler(guildID, channelID string) {
-	currentGuild := bot.servers[guildID]
+func soundHandler(s *discordgo.Session, guildID, channelID string, currentGuild *server, controlChannel <-chan int) {
 
-	var guildMediaSession mediaSession
-	guildMediaSession.stop = make(chan bool)
+	log.Println("Soundhandler not active, activating")
 
-	vc, err := bot.session.ChannelVoiceJoin(guildID, channelID, false, true)
-	if err != nil {
-		log.Println(err)
-		return
-	}
+	// Set up voiceconnection
+	//TODO: HANDLE THIS ERROR - IF YOU CAN'T JOIN THE CHANNEL IDK WHAT TO DO
+	vc, _ := s.ChannelVoiceJoin(guildID, channelID, false, true)
 
-	// Defer disconnection and mediaSession cleanup
-	defer func() {
-		vc.Disconnect()
-
-		currentGuild.Lock()
-		currentGuild.songPlaying = false
-		currentGuild.songPlayingChannel = ""
-		currentGuild.mediaSessions.cleanUp()
-		currentGuild.mediaSessions = nil
-		currentGuild.Unlock()
-	}()
-
-	currentGuild.Lock()
-	currentGuild.mediaSessions = &guildMediaSession
-	currentGuild.songPlayingChannel = channelID
-	log.Println("Songqueue length =", len(currentGuild.songQueue))
 	for {
-
-		for len(currentGuild.songQueue) > 0 {
-			var currentSong songURL
-			currentSong, currentGuild.songQueue = currentGuild.songQueue[0], currentGuild.songQueue[1:]
-			currentGuild.Unlock()
-
-			encode, download, err := makeSongSession(currentSong.submission)
+		select {
+		case song := <-currentGuild.songQueue:
+			encode, download, err := makeSongSession(song.submission)
+			streamingSession := newStreamingSession(encode, vc)
 			if err != nil {
 				log.Println(err)
-				break
+				return
 			}
 
 			vc.Speaking(true)
 
 			log.Println("started stream")
 
-			streamingSession := newStream(encode, vc)
+			streamingSession.Start()
 
-			guildMediaSession.Lock()
-			guildMediaSession.download = download
-			guildMediaSession.encode = encode
-			guildMediaSession.stream = streamingSession
-			guildMediaSession.Unlock()
-
-			// Goroutine blocks here until song ends or commanded to disconnect
 			select {
-			case err = <-currentGuild.mediaSessions.stream.done:
-			case <-currentGuild.mediaSessions.stop:
-				return
+			case err := <-streamingSession.done:
+				vc.Speaking(false)
+				log.Println("Finished Song; reason: ", err)
+				continue
+			case control := <-controlChannel:
+				switch control {
+				case pause:
+					// TODO:
+				case resume:
+					// TODO:
+				case skip:
+					download.process.Kill()
+					encode.Cleanup()
+					// TODO:
+				case disconnect:
+					download.process.Kill()
+					encode.Cleanup()
+					streamingSession.stop <- true
+					// TODO:
+				}
 			}
-			log.Println("finished song; reason: ", err)
-
-			guildMediaSession.cleanUp()
-
+		default:
+			//DO SOMeTHING
 			currentGuild.Lock()
-		}
-		vc.Speaking(false)
-		currentGuild.Unlock()
 
-		// 10 seconds before bot disconnects to reduce churn if someone adds a song after previous has finished.
-		time.Sleep(10 * time.Second)
+			currentGuild.mediaStatus.songPlaying = false
 
-		currentGuild.Lock()
-		if len(currentGuild.songQueue) < 1 {
-			break
 		}
 
 	}
-	currentGuild.Unlock()
+
 }
 
 // cleanUp ends the external processes downloading and encoding the media being played

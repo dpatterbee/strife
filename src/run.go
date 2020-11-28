@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
@@ -23,6 +24,8 @@ type strifeBot struct {
 	client          *firestore.Client
 	session         *discordgo.Session
 }
+
+const standardTimeout = time.Millisecond * 500
 
 var bot strifeBot
 var ctx context.Context

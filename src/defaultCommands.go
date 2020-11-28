@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
@@ -76,6 +77,17 @@ func makeDefaultCommands() map[string]dfc {
 }
 
 func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+
+	com := mediaCommand{commandType: 0, commandData: ""}
+
+	resultChan := make(chan error)
+
+	req := mediaCommandHolder{command: com, result: resultChan}
+
+	chanel <- req
+
+	err := <-resultChan
+
 	log.Println("setting up sound")
 	guildID := m.GuildID
 
@@ -87,30 +99,42 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 		return "", err
 	}
 
+	// Check user is in voice channel
 	userChannel, err := getUserVoiceChannel(sess, url.requester, guildID)
 	if err != nil {
 		return "You must be in a voice channel to request a song", nil
 	}
 
+	// Check user is in same channel as song is playing if there currently is one
 	currentGuild.Lock()
-	if currentGuild.songPlaying {
-		log.Println("Song already playing, adding to queue")
-		if userChannel != currentGuild.songPlayingChannel {
-			currentGuild.Unlock()
-			return "You must be in the same voice channel as the music bot to request a song", nil
-		}
-		currentGuild.songQueue = append(currentGuild.songQueue, url)
-		log.Println("Queue length:", len(currentGuild.songQueue))
+	if currentGuild.mediaStatus.songPlaying && currentGuild.mediaStatus.songPlayingChannel != userChannel {
 		currentGuild.Unlock()
-		return "Song added to queue", nil
+		return "You must be in the same voice channel as the music bot to request a song", nil
 	}
-	currentGuild.songQueue = append(currentGuild.songQueue, url)
-	currentGuild.songPlaying = true
-	log.Println("Queue length:", len(currentGuild.songQueue))
 	currentGuild.Unlock()
 
-	log.Println("Soundhandler not active, activating")
-	go soundHandler(guildID, userChannel)
+	// Attempt to add song to queue, returning if queue is full
+	select {
+	case currentGuild.songQueue <- url:
+		log.Println("Queue length:", len(currentGuild.songQueue))
+	default:
+		log.Println("Queue length:", len(currentGuild.songQueue))
+		return "Queue full, try again later", nil
+	}
+
+	// Start the soundHandler if there isn't one currently active
+	currentGuild.Lock()
+	if !currentGuild.mediaStatus.songPlaying {
+
+		currentGuild.mediaStatus.songPlaying = true
+		currentGuild.mediaStatus.songPlayingChannel = userChannel
+
+		controlChan := make(chan int)
+		currentGuild.mediaStatus.mediaControlChan = controlChan
+
+		go soundHandler(sess, guildID, userChannel, currentGuild, controlChan)
+	}
+	currentGuild.Unlock()
 
 	return "Song added to queue", nil
 }
@@ -258,23 +282,29 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 	userID, guildID := m.Author.ID, m.GuildID
 	currentGuild := bot.servers[guildID]
 
-	currentGuild.Lock()
-	if !currentGuild.songPlaying {
-		currentGuild.Unlock()
-		return "No music playing", nil
-	}
-	currentGuild.Unlock()
-
 	userChannel, err := getUserVoiceChannel(s, userID, guildID)
 	if err != nil {
 		return "", err
 	}
 
-	if userChannel != currentGuild.songPlayingChannel {
-		return "You must be in the same voice channel as the bot to pause music", nil
+	currentGuild.RLock()
+	if !currentGuild.mediaStatus.songPlaying {
+		currentGuild.RUnlock()
+		return "No music playing", nil
 	}
 
-	currentGuild.mediaSessions.stream.Pause()
+	if userChannel != currentGuild.mediaStatus.songPlayingChannel {
+		currentGuild.RUnlock()
+		return "You must be in the same voice channel as the bot to pause music", nil
+	}
+	currentGuild.RUnlock()
+
+	timer := time.NewTimer(standardTimeout)
+	select {
+	case currentGuild.mediaStatus.mediaControlChan <- 0:
+		timer.Stop()
+	case <-timer.C:
+	}
 
 	return "Song paused", nil
 
@@ -286,10 +316,11 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 	currentGuild := bot.servers[guildID]
 
 	currentGuild.Lock()
-	if !currentGuild.songPlaying {
+	if !currentGuild.mediaStatus.songPlaying {
 		currentGuild.Unlock()
 		return "No music playing", nil
 	}
+
 	currentGuild.Unlock()
 
 	userChannel, err := getUserVoiceChannel(s, userID, guildID)
@@ -297,11 +328,16 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 		return "", err
 	}
 
-	if userChannel != currentGuild.songPlayingChannel {
+	if userChannel != currentGuild.mediaStatus.songPlayingChannel {
 		return "You must be in the same voice channel as the bot to resume music", nil
 	}
 
-	currentGuild.mediaSessions.stream.Resume()
+	timer := time.NewTimer(standardTimeout)
+	select {
+	case currentGuild.mediaStatus.mediaControlChan <- 1:
+		timer.Stop()
+	case <-timer.C:
+	}
 
 	return "Song resumed", nil
 }
@@ -312,7 +348,7 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 	currentGuild := bot.servers[guildID]
 
 	currentGuild.Lock()
-	if !currentGuild.songPlaying {
+	if !currentGuild.mediaStatus.songPlaying {
 		currentGuild.Unlock()
 		return "No music playing", nil
 	}
@@ -323,11 +359,16 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 		return "", err
 	}
 
-	if userChannel != currentGuild.songPlayingChannel {
+	if userChannel != currentGuild.mediaStatus.songPlayingChannel {
 		return "You must be in the same voice channel as the bot to skip songs", nil
 	}
 
-	currentGuild.mediaSessions.stream.Skip()
+	timer := time.NewTimer(standardTimeout)
+	select {
+	case currentGuild.mediaStatus.mediaControlChan <- 2:
+		timer.Stop()
+	case <-timer.C:
+	}
 
 	return "Song skipped", nil
 
@@ -338,23 +379,21 @@ func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string)
 	userID, guildID := m.Author.ID, m.GuildID
 	currentGuild := bot.servers[guildID]
 
-	currentGuild.Lock()
-	// if !currentGuild.inVC {
-	// 	currentGuild.Unlock()
-	// 	return "Not in vc", nil
-	// }
-	currentGuild.Unlock()
-
 	userChannel, err := getUserVoiceChannel(s, userID, guildID)
 	if err != nil {
 		return "", err
 	}
 
-	if userChannel != currentGuild.songPlayingChannel {
+	if userChannel != currentGuild.mediaStatus.songPlayingChannel {
 		return "You must be in the same voice channel as the bot to make it leave", nil
 	}
 
-	currentGuild.mediaSessions.disconnect()
+	timer := time.NewTimer(standardTimeout)
+	select {
+	case currentGuild.mediaStatus.mediaControlChan <- 3:
+		timer.Stop()
+	case <-timer.C:
+	}
 
 	return "Bot gone", nil
 
