@@ -131,6 +131,8 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 			}
 		case guildID := <-mediaReturnChannel:
 			// Ensure the song channel is drained for potential gc reasons
+			close(mediaChannels[guildID].songChannel)
+			close(mediaChannels[guildID].controlChannel)
 			for range mediaChannels[guildID].songChannel {
 			}
 			delete(mediaChannels, guildID)
