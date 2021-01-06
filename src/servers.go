@@ -3,7 +3,6 @@ package strife
 import (
 	"context"
 	"log"
-	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"google.golang.org/api/iterator"
@@ -18,22 +17,11 @@ type serverl struct {
 }
 
 type server struct {
-	Commands    map[string]string
-	Name        string
-	Prefix      string
-	Roles       map[string]int64
-	ID          string
-	songQueue   chan songURL
-	mediaStatus mediaPlayingStatus
-	sync.RWMutex
-}
-
-type mediaPlayingStatus struct {
-	mediaControlChan   chan int
-	songPlayingChannel string
-	songPlaying        bool
-	songPaused         bool
-	sync.RWMutex
+	Commands map[string]string
+	Name     string
+	Prefix   string
+	Roles    map[string]int64
+	ID       string
 }
 
 func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*server {
@@ -96,12 +84,11 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 
 	for i, v := range svs {
 		sss[i] = &server{
-			Commands:  v.Commands,
-			Name:      v.Name,
-			Prefix:    v.Prefix,
-			Roles:     v.Roles,
-			ID:        v.ID,
-			songQueue: make(chan songURL, 100),
+			Commands: v.Commands,
+			Name:     v.Name,
+			Prefix:   v.Prefix,
+			Roles:    v.Roles,
+			ID:       v.ID,
 		}
 	}
 

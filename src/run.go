@@ -19,10 +19,11 @@ import (
 )
 
 type strifeBot struct {
-	servers         map[string]*server
-	defaultCommands map[string]dfc
-	client          *firestore.Client
-	session         *discordgo.Session
+	servers                map[string]*server
+	defaultCommands        map[string]dfc
+	mediaControllerChannel chan mediaRequest
+	client                 *firestore.Client
+	session                *discordgo.Session
 }
 
 const standardTimeout = time.Millisecond * 500
@@ -64,6 +65,8 @@ func Run(args []string) int {
 		return 1
 	}
 	log.Println("Discord connection opened")
+
+	bot.mediaControllerChannel = createMainMediaController(bot.session)
 
 	log.Println("Setup Complete")
 
@@ -193,7 +196,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	content := strings.TrimPrefix(m.Content, currentServer.Prefix)
 
 	splitContent := strings.Split(content, " ")
-	content = strings.TrimPrefix(content, splitContent[0]+" ")
+	if len(splitContent) == 1 {
+		content = ""
+	} else {
+		content = strings.TrimPrefix(content, splitContent[0]+" ")
+	}
 
 	var response string
 
@@ -218,6 +225,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if response != "" {
+		response = "**" + response + "**"
 		message, err := s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {
 			panic(err)
@@ -248,4 +256,23 @@ func getServerRoles(s *discordgo.Session, i string) map[string]int64 {
 	}
 
 	return m
+}
+
+func trySend(channel chan string, data string, timeoutDuration time.Duration) {
+	timeout := time.NewTimer(timeoutDuration)
+
+	select {
+	case channel <- data:
+		timeout.Stop()
+	case <-timeout.C:
+		return
+	}
+}
+
+func createMainMediaController(sess *discordgo.Session) chan mediaRequest {
+	ch := make(chan mediaRequest)
+
+	go mediaControlRouter(sess, ch)
+
+	return ch
 }
