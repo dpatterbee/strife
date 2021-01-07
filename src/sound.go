@@ -78,6 +78,8 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 	// This loops for the lifetime of the program, responding to messages sent on each channel.
 	for {
 
+		//TODO: BIG RACE CONDITION WHEN A CHANNEL DISCONNECTS AND THEN SWIFTLY REJOINS.
+		// POTENTIAL SOLUTION IS TO KEEP TRACK OF PENDING DISCONNECTS AND MAKE NEW SONG SESSIONS WAIT UNTIL THE LAST ONE HAS ENDED.
 		select {
 		case elem := <-mediaCommandChannel:
 			switch elem.commandType {
@@ -85,8 +87,8 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 
 				ch, ok := mediaChannels[elem.guildID]
 				if !ok {
-					controlChannel := make(chan mediaCommand, 10)
-					songChannel := make(chan string, 100) // This serves as a song queue. Which in hindsight is pretty terrible.
+					controlChannel := make(chan mediaCommand)
+					songChannel := make(chan string, 100) // This serves as a song queue. Which in hindsight is pretty terrible. As I do not believe it can be inspected.
 					mediaChannels[elem.guildID] = mediaChannel{
 						controlChannel: controlChannel,
 						songChannel:    songChannel,
@@ -99,9 +101,9 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 				result := "Song added to queue"
 
 				// Perform operations in separate goroutine to avoid blocking
-				go func(returnChannel, mediaChannel chan string, commandData string) {
+				go func(returnChannel, songChannel chan string, commandData string) {
 					select {
-					case mediaChannel <- commandData:
+					case songChannel <- commandData:
 					default:
 						result = "Queue full, please try again later."
 					}
@@ -110,9 +112,46 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 
 				}(elem.returnChannel, ch.songChannel, elem.commandData)
 
+			case disconnect:
+				mc, ok := mediaChannels[elem.guildID]
+				//TODO: THERE IS A DELETE IN A CAPTURED MAP IN THIS GOROUTINE WHICH IS A BIG NO NO.
+				go func() {
+					timeout := time.NewTimer(standardTimeout)
+					if ok {
+						select {
+						case mc.controlChannel <- mediaCommand{commandType: elem.commandType, returnChannel: elem.returnChannel}:
+							// Ensure the song channel is drained for potential gc reasons
+							go func(a mediaChannel) {
+								close(a.controlChannel)
+								close(a.songChannel)
+								for range a.songChannel {
+
+								}
+								for b := range a.controlChannel {
+									timeout := time.NewTimer(standardTimeout)
+									select {
+									case b.returnChannel <- "":
+										timeout.Stop()
+									case <-timeout.C:
+									}
+								}
+							}(mediaChannels[elem.guildID])
+							delete(mediaChannels, elem.guildID)
+
+							timeout.Stop()
+							return
+						case <-timeout.C:
+							go trySend(elem.returnChannel, "Serber bisi", standardTimeout)
+							return
+						}
+					}
+
+					go trySend(elem.returnChannel, "No media playing", standardTimeout)
+				}()
+
 			default:
 				mc, ok := mediaChannels[elem.guildID]
-				go func(ch chan mediaCommand) {
+				go func() {
 					timeout := time.NewTimer(standardTimeout)
 					if ok {
 						select {
@@ -126,17 +165,31 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 					}
 
 					go trySend(elem.returnChannel, "No media playing", standardTimeout)
-				}(mc.controlChannel)
+				}()
 
 			}
 		case guildID := <-mediaReturnChannel:
 			// Ensure the song channel is drained for potential gc reasons
-			close(mediaChannels[guildID].songChannel)
-			close(mediaChannels[guildID].controlChannel)
-			for range mediaChannels[guildID].songChannel {
-			}
-			delete(mediaChannels, guildID)
+			_, ok := mediaChannels[guildID]
+			if ok {
 
+				go func(a mediaChannel) {
+					close(a.controlChannel)
+					close(a.songChannel)
+					for range a.songChannel {
+
+					}
+					for b := range a.controlChannel {
+						timeout := time.NewTimer(standardTimeout)
+						select {
+						case b.returnChannel <- "":
+							timeout.Stop()
+						case <-timeout.C:
+						}
+					}
+				}(mediaChannels[guildID])
+				delete(mediaChannels, guildID)
+			}
 		}
 
 	}
@@ -180,7 +233,6 @@ func streamSong(writePipe io.Writer, s string, d *downloadSession) {
 		log.Println("ytdl start", err)
 		return
 	}
-	d.Lock()
 	d.process = ytdl.Process
 	d.Unlock()
 
@@ -199,6 +251,7 @@ func makeSongSession(s string) (*dca.EncodeSession, *downloadSession, error) {
 
 	var d downloadSession
 
+	d.Lock()
 	go streamSong(bufferedWritePipe, s, &d)
 
 	ss, err := dca.EncodeMem(bufferedReadPipe, dca.StdEncodeOptions)
@@ -259,6 +312,7 @@ func soundHandler(s *discordgo.Session, guildID, channelID string, controlChanne
 
 			streamingSession.Start()
 
+			// controlLoop should only be entered once it is possible to control the media ie. once the ffmpeg and youtube-dl sessions are up and running
 		controlLoop:
 			for {
 				select {
@@ -274,32 +328,44 @@ func soundHandler(s *discordgo.Session, guildID, channelID string, controlChanne
 
 					case pause:
 						streamingSession.stop <- true
-						// TODO:
 						go trySend(control.returnChannel, "Song paused.", standardTimeout)
 
 					case resume:
 						go streamingSession.stream()
-						// TODO:
 						go trySend(control.returnChannel, "Song resumed.", standardTimeout)
 
 					case skip:
-						streamingSession.skip <- true
+						if !encode.Running() {
+							go trySend(control.returnChannel, "Not yet.", standardTimeout)
+							continue
+
+						}
 						go trySend(control.returnChannel, "Song skipped.", standardTimeout)
-						encode.Cleanup()
+						streamingSession.skip <- true
+
+						download.Lock()
 						download.process.Kill()
+						download.Unlock()
+						encode.Cleanup()
+
 						break controlLoop
-						// TODO:
 
 					case disconnect:
-						download.process.Kill()
-						encode.Cleanup()
+						if !encode.Running() {
+							go trySend(control.returnChannel, "Not yet.", standardTimeout)
+							continue
+
+						}
+						go trySend(control.returnChannel, "Goodbye.", standardTimeout)
 						streamingSession.stop <- true
+						download.Lock()
+						download.process.Kill()
+						download.Unlock()
+						encode.Cleanup()
 
 						vc.Disconnect()
 						mediaReturnChannel <- guildID
-						go trySend(control.returnChannel, "Goodbye.", standardTimeout)
 						return
-						// TODO:
 					}
 				}
 			}
@@ -315,6 +381,15 @@ func soundHandler(s *discordgo.Session, guildID, channelID string, controlChanne
 
 	}
 
+}
+
+func c(e *dca.EncodeSession) error {
+	err := e.Stop()
+	if err != nil {
+		return err
+	}
+	e.Cleanup()
+	return nil
 }
 
 // cleanUp ends the external processes downloading and encoding the media being played
