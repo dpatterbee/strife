@@ -59,98 +59,92 @@ type downloadSession struct {
 	sync.Mutex
 }
 
-type mediaChannel struct {
-	songChannel    chan string
-	controlChannel chan mediaCommand
-}
-
 // mediaControlRouter function runs perpetually, maintaining a pool of all currently active media sessions.
 // It routes commands to the correct channel, creating a new media session if one is required to fulfill the request.
 func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan mediaRequest) {
 
-	// This is a map of guildIDs to mediaChannels. It contains all currently active media sessions.
-	mediaChannels := make(map[string]mediaChannel)
+	type activeMediaChannel struct {
+		songChannel    chan string
+		controlChannel chan mediaCommand
+	}
 
-	// This channel is used by a media channel to inform the router that it no longer exists and can be removed from the map
-	// As there is only one instance of this function running there should never be a race condition here
+	type dyingMediaChannel struct {
+		dependedOn bool
+		dependency chan bool
+	}
+
+	// activeMediaChannels is a map of channels which are currently serving song requests.
+	// dyingMediaChannels is a map of channels which have been instructed to shut down or have timed out, but have not yet completed their shutdown tasks.
+	activeMediaChannels := make(map[string]activeMediaChannel)
+	dyingMediaChannels := make(map[string]dyingMediaChannel)
+
+	// These channels are used by guildSoundPlayer goroutines to inform this goroutine of their shutdown status.
+	// mediaReturnChannel is used to inform that it has begun shutting down and that no more song or command requests should be forwarded to that goroutine.
+	// mediaFiniChannel is used to inform that it has completed shutting down and that any waiting goroutines can be released.
 	mediaReturnChannel := make(chan string)
+	mediaFiniChannel := make(chan string)
 
 	// This loops for the lifetime of the program, responding to messages sent on each channel.
 	for {
 
-		//TODO: BIG RACE CONDITION WHEN A CHANNEL DISCONNECTS AND THEN SWIFTLY REJOINS.
-		// POTENTIAL SOLUTION IS TO KEEP TRACK OF PENDING DISCONNECTS AND MAKE NEW SONG SESSIONS WAIT UNTIL THE LAST ONE HAS ENDED.
 		select {
 		case elem := <-mediaCommandChannel:
 			switch elem.commandType {
 			case play:
 
-				ch, ok := mediaChannels[elem.guildID]
+				ch, ok := activeMediaChannels[elem.guildID]
 				if !ok {
 					controlChannel := make(chan mediaCommand)
-					songChannel := make(chan string, 100) // This serves as a song queue. Which in hindsight is pretty terrible. As I do not believe it can be inspected.
-					mediaChannels[elem.guildID] = mediaChannel{
+					songChannel := make(chan string, 100) // This serves as a song queue. Which in hindsight is pretty terrible as I do not believe it can be inspected. TODO: Fix this.
+					activeMediaChannels[elem.guildID] = activeMediaChannel{
 						controlChannel: controlChannel,
 						songChannel:    songChannel,
 					}
 
-					ch = mediaChannels[elem.guildID]
-					go soundHandler(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel)
+					ch = activeMediaChannels[elem.guildID]
+					// Checks if there exists a guildSoundPlayer goroutine which is currently dying, and creates the channel required so we can wait for the old goroutine to shut down.
+					if j, ok := dyingMediaChannels[elem.guildID]; ok {
+						dependencyChan := make(chan bool)
+						j.dependedOn = true
+						j.dependency = dependencyChan
+
+						go guildSoundPlayer(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel, mediaFiniChannel, dependencyChan)
+					} else {
+						go guildSoundPlayer(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel, mediaFiniChannel, nil)
+					}
 				}
 
 				result := "Song added to queue"
 
 				// Perform operations in separate goroutine to avoid blocking
-				go func(returnChannel, songChannel chan string, commandData string) {
-					select {
-					case songChannel <- commandData:
-					default:
-						result = "Queue full, please try again later."
-					}
+				select {
+				case ch.songChannel <- elem.commandData:
+				default:
+					result = "Queue full, please try again later."
+				}
 
-					go trySend(returnChannel, result, standardTimeout)
-
-				}(elem.returnChannel, ch.songChannel, elem.commandData)
+				go trySend(elem.returnChannel, result, standardTimeout)
 
 			case disconnect:
-				mc, ok := mediaChannels[elem.guildID]
-				//TODO: THERE IS A DELETE IN A CAPTURED MAP IN THIS GOROUTINE WHICH IS A BIG NO NO.
-				go func() {
-					timeout := time.NewTimer(standardTimeout)
-					if ok {
+				mc, ok := activeMediaChannels[elem.guildID]
+
+				if ok {
+					go func(mc activeMediaChannel) {
+						timeout := time.NewTimer(10 * time.Minute)
 						select {
-						case mc.controlChannel <- mediaCommand{commandType: elem.commandType, returnChannel: elem.returnChannel}:
-							// Ensure the song channel is drained for potential gc reasons
-							go func(a mediaChannel) {
-								close(a.controlChannel)
-								close(a.songChannel)
-								for range a.songChannel {
-
-								}
-								for b := range a.controlChannel {
-									timeout := time.NewTimer(standardTimeout)
-									select {
-									case b.returnChannel <- "":
-										timeout.Stop()
-									case <-timeout.C:
-									}
-								}
-							}(mediaChannels[elem.guildID])
-							delete(mediaChannels, elem.guildID)
-
+						case mc.controlChannel <- mediaCommand{commandType: disconnect, returnChannel: elem.returnChannel}:
 							timeout.Stop()
-							return
 						case <-timeout.C:
-							go trySend(elem.returnChannel, "Serber bisi", standardTimeout)
-							return
-						}
-					}
 
-					go trySend(elem.returnChannel, "No media playing", standardTimeout)
-				}()
+						}
+					}(mc)
+
+					dyingMediaChannels[elem.guildID] = dyingMediaChannel{}
+					delete(activeMediaChannels, elem.guildID)
+				}
 
 			default:
-				mc, ok := mediaChannels[elem.guildID]
+				mc, ok := activeMediaChannels[elem.guildID]
 				go func() {
 					timeout := time.NewTimer(standardTimeout)
 					if ok {
@@ -169,27 +163,30 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 
 			}
 		case guildID := <-mediaReturnChannel:
-			// Ensure the song channel is drained for potential gc reasons
-			_, ok := mediaChannels[guildID]
+
+			// When a guildSoundPlayer goroutine informs us that they are beginning to shut down, we close the communications channels and drain them,
+			// then create an entry in our dyingMediaChannels map and remove from activeMediaChannels
+			_, ok := activeMediaChannels[guildID]
 			if ok {
-
-				go func(a mediaChannel) {
-					close(a.controlChannel)
-					close(a.songChannel)
-					for range a.songChannel {
-
-					}
-					for b := range a.controlChannel {
-						timeout := time.NewTimer(standardTimeout)
-						select {
-						case b.returnChannel <- "":
-							timeout.Stop()
-						case <-timeout.C:
-						}
-					}
-				}(mediaChannels[guildID])
-				delete(mediaChannels, guildID)
+				dyingMediaChannels[guildID] = dyingMediaChannel{}
+				delete(activeMediaChannels, guildID)
 			}
+		case guildID := <-mediaFiniChannel:
+
+			// When a guildSoundPlayer goroutine informs us that it has completed shutting down, if that shutdown has a dependency, we inform the dependent that
+			// it is now free to go, and we remove it from the map and close the channel. Otherwise we simply remove it from the map.
+			if pp, ok := dyingMediaChannels[guildID]; ok {
+				if pp.dependedOn {
+					go func(ch chan<- bool) {
+						ch <- true
+						close(ch)
+					}(pp.dependency)
+					delete(dyingMediaChannels, guildID)
+				} else {
+					delete(dyingMediaChannels, guildID)
+				}
+			}
+
 		}
 
 	}
@@ -279,15 +276,45 @@ func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (strin
 
 }
 
-// soundHandler runs while a server has a queue of songs to be played.
+// guildSoundPlayer runs while a server has a queue of songs to be played.
 // It loops over the queue of songs and plays them in order, exiting once it has drained the list
-func soundHandler(s *discordgo.Session, guildID, channelID string, controlChannel <-chan mediaCommand, songChannel <-chan string, mediaReturnChannel chan<- string) {
+func guildSoundPlayer(
+	s *discordgo.Session,
+	guildID, channelID string,
+	controlChannel <-chan mediaCommand,
+	songChannel <-chan string,
+	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
+	previousrunningthingchan <-chan bool,
+) {
+
+	if previousrunningthingchan != nil {
+		<-previousrunningthingchan
+	}
+
+	songQueue := struct {
+		songQ []string
+		sync.Mutex
+	}{
+		songQ: make([]string, 100),
+	}
 
 	log.Println("Soundhandler not active, activating")
 
 	// Set up voiceconnection
-	//TODO: HANDLE THIS ERROR - IF YOU CAN'T JOIN THE CHANNEL IDK WHAT TO DO
-	vc, _ := s.ChannelVoiceJoin(guildID, channelID, false, true)
+	// If a previous connection is active, this will error, and we will retry every 200ms 20 times to attempt to join.
+	//TODO: Doesn't work
+	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+	for i := 0; err != nil && i < 20; i++ {
+		time.Sleep(200 * time.Millisecond)
+		vc, err = s.ChannelVoiceJoin(guildID, channelID, false, true)
+	}
+
+	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
+	if err != nil {
+		mediaReturnRequestChan <- guildID
+		log.Println("Couldn't initialise voice connection")
+		return
+	}
 
 	disconnectTimer := time.NewTimer(5 * time.Second)
 
@@ -364,17 +391,22 @@ func soundHandler(s *discordgo.Session, guildID, channelID string, controlChanne
 						encode.Cleanup()
 
 						vc.Disconnect()
-						mediaReturnChannel <- guildID
+						mediaReturnFinishChan <- guildID
 						return
 					}
 				}
 			}
 
 		case <-disconnectTimer.C:
+			select {
+			// catch any song coming in between the timer expiring and the media return channel catching the controlling loop
+			case song := <-songChannel:
+				songQueue.songQ = append(songQueue.songQ, song)
+			case mediaReturnRequestChan <- guildID:
+			}
 			//DO SOMeTHING
 			vc.Disconnect()
-
-			mediaReturnChannel <- guildID
+			mediaReturnFinishChan <- guildID
 			return
 
 		}

@@ -258,7 +258,9 @@ func getServerRoles(s *discordgo.Session, i string) map[string]int64 {
 	return m
 }
 
+// trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
 func trySend(channel chan string, data string, timeoutDuration time.Duration) {
+	// this will sure lend itself to generics when the time comes.
 	timeout := time.NewTimer(timeoutDuration)
 
 	select {
