@@ -20,7 +20,7 @@ import (
 
 type strifeBot struct {
 	servers                map[string]*server
-	defaultCommands        map[string]dfc
+	defaultCommands        map[string]botCommand
 	mediaControllerChannel chan mediaRequest
 	client                 *firestore.Client
 	session                *discordgo.Session

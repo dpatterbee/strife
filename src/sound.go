@@ -22,6 +22,7 @@ const (
 	resume
 	skip
 	disconnect
+	inspect
 )
 
 var (
@@ -103,10 +104,9 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 
 					ch = activeMediaChannels[elem.guildID]
 					// Checks if there exists a guildSoundPlayer goroutine which is currently dying, and creates the channel required so we can wait for the old goroutine to shut down.
-					if j, ok := dyingMediaChannels[elem.guildID]; ok {
+					if _, ok := dyingMediaChannels[elem.guildID]; ok {
 						dependencyChan := make(chan bool)
-						j.dependedOn = true
-						j.dependency = dependencyChan
+						dyingMediaChannels[elem.guildID] = dyingMediaChannel{dependedOn: true, dependency: dependencyChan}
 
 						go guildSoundPlayer(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel, mediaFiniChannel, dependencyChan)
 					} else {
@@ -116,7 +116,6 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 
 				result := "Song added to queue"
 
-				// Perform operations in separate goroutine to avoid blocking
 				select {
 				case ch.songChannel <- elem.commandData:
 				default:
@@ -139,7 +138,7 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 						}
 					}(mc)
 
-					dyingMediaChannels[elem.guildID] = dyingMediaChannel{}
+					dyingMediaChannels[elem.guildID] = dyingMediaChannel{dependedOn: false, dependency: nil}
 					delete(activeMediaChannels, elem.guildID)
 				}
 
@@ -284,31 +283,23 @@ func guildSoundPlayer(
 	controlChannel <-chan mediaCommand,
 	songChannel <-chan string,
 	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
-	previousrunningthingchan <-chan bool,
+	previousInstanceWaitChan <-chan bool,
 ) {
-
-	if previousrunningthingchan != nil {
-		<-previousrunningthingchan
-	}
-
-	songQueue := struct {
-		songQ []string
-		sync.Mutex
-	}{
-		songQ: make([]string, 100),
-	}
-
 	log.Println("Soundhandler not active, activating")
 
-	// Set up voiceconnection
-	// If a previous connection is active, this will error, and we will retry every 200ms 20 times to attempt to join.
-	//TODO: Doesn't work
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
-	for i := 0; err != nil && i < 20; i++ {
-		time.Sleep(200 * time.Millisecond)
-		vc, err = s.ChannelVoiceJoin(guildID, channelID, false, true)
+	if previousInstanceWaitChan != nil {
+		<-previousInstanceWaitChan
 	}
 
+	nextSong := make(chan string)
+	inspectSongQueue := make(chan chan []string)
+	queueShutDown := make(chan chan []string)
+	go songQueue(songChannel, nextSong, inspectSongQueue, queueShutDown)
+
+	// Set up voiceconnection
+	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+
+	//TODO: improve how this handles songs that have been requested and such after we fix song queues
 	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
 	if err != nil {
 		mediaReturnRequestChan <- guildID
@@ -324,7 +315,7 @@ func guildSoundPlayer(
 		}
 		disconnectTimer.Reset(5 * time.Second)
 		select {
-		case song := <-songChannel:
+		case song := <-nextSong:
 			log.Println("song link:", song)
 			encode, download, err := makeSongSession(song)
 			streamingSession := newStreamingSession(encode, vc)
@@ -389,22 +380,29 @@ func guildSoundPlayer(
 						download.process.Kill()
 						download.Unlock()
 						encode.Cleanup()
+						remainingQ := make(chan []string)
+						queueShutDown <- remainingQ
+						<-remainingQ
 
 						vc.Disconnect()
 						mediaReturnFinishChan <- guildID
 						return
+
+					case inspect:
+						qch := make(chan []string)
+						inspectSongQueue <- qch
+						q := <-qch
+						go trySend(control.returnChannel, fmt.Sprint(q), standardTimeout)
 					}
 				}
 			}
 
 		case <-disconnectTimer.C:
-			select {
-			// catch any song coming in between the timer expiring and the media return channel catching the controlling loop
-			case song := <-songChannel:
-				songQueue.songQ = append(songQueue.songQ, song)
-			case mediaReturnRequestChan <- guildID:
-			}
-			//DO SOMeTHING
+			mediaReturnRequestChan <- guildID
+			// TODO: I have implemented the potential for returning the queue after a session ends. This could be recovered afterwards.
+			remainingQ := make(chan []string)
+			queueShutDown <- remainingQ
+			<-remainingQ
 			vc.Disconnect()
 			mediaReturnFinishChan <- guildID
 			return
@@ -415,29 +413,41 @@ func guildSoundPlayer(
 
 }
 
-func c(e *dca.EncodeSession) error {
-	err := e.Stop()
-	if err != nil {
-		return err
+func songQueue(ch <-chan string, cc chan<- string, inspector <-chan chan []string, shutdown <-chan chan []string) {
+
+	var songQueue []string
+	for {
+		if len(songQueue) == 0 {
+			select {
+			case song := <-ch:
+				songQueue = append(songQueue, song)
+			case ret := <-inspector:
+				// This is slightly confusing. We do this rather than just sending directly on the channel so that we avoid data races and also only copy when required.
+				q := make([]string, len(songQueue))
+				copy(q, songQueue)
+				// This is a blocking send. The receiver must listen immediately or be put to death.
+				ret <- q
+			case sht := <-shutdown:
+				sht <- songQueue
+				return
+			}
+		} else {
+			select {
+			case song := <-ch:
+				songQueue = append(songQueue, song)
+			case cc <- songQueue[0]:
+				songQueue = songQueue[1:]
+			case ret := <-inspector:
+				// This is slightly confusing. We do this rather than just sending directly on the channel so that we avoid data races and also only copy when required.
+				q := make([]string, len(songQueue))
+				copy(q, songQueue)
+				// This is a blocking send. The receiver must listen immediately or be put to death.
+				ret <- q
+			case sht := <-shutdown:
+				sht <- songQueue
+				return
+			}
+		}
 	}
-	e.Cleanup()
-	return nil
-}
 
-// cleanUp ends the external processes downloading and encoding the media being played
-func (s *mediaSession) cleanUp() {
-
-	if s.download != nil {
-		s.download.process.Kill()
-	}
-	if s.encode != nil {
-		s.encode.Cleanup()
-	}
-
-	s = &mediaSession{}
-
-}
-
-func (s *mediaSession) disconnect() {
-	s.stop <- true
 }

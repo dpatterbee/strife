@@ -10,7 +10,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-type dfc struct {
+type botCommand struct {
 	command    string
 	function   defCommand
 	permission int
@@ -26,7 +26,7 @@ const (
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
 
-var something = []dfc{
+var something = []botCommand{
 	{
 		command: "marco", function: polo, permission: botunknown,
 	},
@@ -63,10 +63,13 @@ var something = []dfc{
 	{
 		command: "disconnect", function: disconnectVoice, permission: botunknown,
 	},
+	{
+		command: "queue", function: inspectQueue, permission: botunknown,
+	},
 }
 
-func makeDefaultCommands() map[string]dfc {
-	cmds := make(map[string]dfc)
+func makeDefaultCommands() map[string]botCommand {
+	cmds := make(map[string]botCommand)
 
 	for _, v := range something {
 		cmds[v.command] = v
@@ -370,6 +373,30 @@ func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string)
 		return result, nil
 	case <-timeout.C:
 		return "Request sent", nil
+	}
+
+}
+
+func inspectQueue(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: inspect, guildID: m.GuildID, channelID: "", returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout = time.NewTimer(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request send", nil
 	}
 
 }
