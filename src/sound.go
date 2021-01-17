@@ -108,9 +108,27 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 						dependencyChan := make(chan bool)
 						dyingMediaChannels[elem.guildID] = dyingMediaChannel{dependedOn: true, dependency: dependencyChan}
 
-						go guildSoundPlayer(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel, mediaFiniChannel, dependencyChan)
+						go guildSoundPlayer(
+							session,
+							elem.guildID,
+							elem.channelID,
+							controlChannel,
+							songChannel,
+							mediaReturnChannel,
+							mediaFiniChannel,
+							dependencyChan,
+						)
 					} else {
-						go guildSoundPlayer(session, elem.guildID, elem.channelID, controlChannel, songChannel, mediaReturnChannel, mediaFiniChannel, nil)
+						go guildSoundPlayer(
+							session,
+							elem.guildID,
+							elem.channelID,
+							controlChannel,
+							songChannel,
+							mediaReturnChannel,
+							mediaFiniChannel,
+							nil,
+						)
 					}
 				}
 
@@ -278,7 +296,7 @@ func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (strin
 // guildSoundPlayer runs while a server has a queue of songs to be played.
 // It loops over the queue of songs and plays them in order, exiting once it has drained the list
 func guildSoundPlayer(
-	s *discordgo.Session,
+	discordSession *discordgo.Session,
 	guildID, channelID string,
 	controlChannel <-chan mediaCommand,
 	songChannel <-chan string,
@@ -297,7 +315,7 @@ func guildSoundPlayer(
 	go songQueue(songChannel, nextSong, inspectSongQueue, queueShutDown)
 
 	// Set up voiceconnection
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+	vc, err := discordSession.ChannelVoiceJoin(guildID, channelID, false, true)
 
 	//TODO: improve how this handles songs that have been requested and such after we fix song queues
 	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
@@ -309,6 +327,7 @@ func guildSoundPlayer(
 
 	disconnectTimer := time.NewTimer(5 * time.Second)
 
+mainLoop:
 	for {
 		if !disconnectTimer.Stop() {
 			<-disconnectTimer.C
@@ -380,13 +399,7 @@ func guildSoundPlayer(
 						download.process.Kill()
 						download.Unlock()
 						encode.Cleanup()
-						remainingQ := make(chan []string)
-						queueShutDown <- remainingQ
-						<-remainingQ
-
-						vc.Disconnect()
-						mediaReturnFinishChan <- guildID
-						return
+						break mainLoop
 
 					case inspect:
 						qch := make(chan []string)
@@ -399,17 +412,19 @@ func guildSoundPlayer(
 
 		case <-disconnectTimer.C:
 			mediaReturnRequestChan <- guildID
-			// TODO: I have implemented the potential for returning the queue after a session ends. This could be recovered afterwards.
-			remainingQ := make(chan []string)
-			queueShutDown <- remainingQ
-			<-remainingQ
-			vc.Disconnect()
-			mediaReturnFinishChan <- guildID
-			return
+			break mainLoop
 
 		}
 
 	}
+
+	// End queue goroutine and disconnect from voice channel before informing the coordinator that we have finished.
+	// TODO: I have implemented the potential for returning the queue after a session ends. This could be recovered afterwards.
+	remainingQ := make(chan []string)
+	queueShutDown <- remainingQ
+	<-remainingQ
+	vc.Disconnect()
+	mediaReturnFinishChan <- guildID
 
 }
 
