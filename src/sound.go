@@ -333,7 +333,10 @@ mainLoop:
 		disconnectTimer.Reset(5 * time.Second)
 		select {
 		case song := <-nextSong:
-			log.Info().Str("song link:", song).Msg("")
+			log.Info().
+				Str("URL", song).
+				Str("guildID", guildID).
+				Msg("Playing Song")
 			encode, download, err := makeSongSession(song)
 			streamingSession := newStreamingSession(encode, vc)
 			if err != nil {
@@ -343,7 +346,10 @@ mainLoop:
 
 			vc.Speaking(true)
 
-			log.Info().Msg("started stream")
+			log.Info().
+				Str("guildID", guildID).
+				Str("channelID", channelID).
+				Msg("Starting Audio Stream")
 
 			streamingSession.Start()
 
@@ -354,8 +360,11 @@ mainLoop:
 
 				case err := <-streamingSession.done:
 					vc.Speaking(false)
-
-					log.Error().Err(err).Msg("Finished Song")
+					if err == io.EOF {
+						log.Info().Msg("Song Completed.")
+					} else {
+						log.Error().Err(err).Msg("Song Stopped")
+					}
 					break controlLoop
 
 				case control := <-controlChannel:

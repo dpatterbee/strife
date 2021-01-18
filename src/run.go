@@ -240,10 +240,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("message", fmt.Sprint(message.ContentWithMentionsReplaced(), message.Author, message.ChannelID, message.GuildID)).
-				Msg("Failed to send message to channel")
+				Str("msg", message.ContentWithMentionsReplaced()).
+				Str("author", message.Author.String()).
+				Str("channelID", message.ChannelID).
+				Msg("")
 		}
-		log.Info().Msg(fmt.Sprint(message.ContentWithMentionsReplaced(), message.Author, message.ChannelID, message.GuildID))
+		log.Info().
+			Str("msg", message.ContentWithMentionsReplaced()).
+			Str("author", message.Author.String()).
+			Str("channelID", message.ChannelID).
+			Msg("")
 	}
 
 }
