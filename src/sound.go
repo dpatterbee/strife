@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"regexp"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -244,7 +244,7 @@ func streamSong(writePipe io.Writer, s string, d *downloadSession) {
 
 	err := ytdl.Start()
 	if err != nil {
-		log.Println("ytdl start", err)
+		log.Error().Err(err).Msg("")
 		return
 	}
 	d.process = ytdl.Process
@@ -252,7 +252,7 @@ func streamSong(writePipe io.Writer, s string, d *downloadSession) {
 
 	err = ytdl.Wait()
 	if err != nil {
-		log.Println("ytdl wait", err)
+		log.Error().Err(err).Msg("")
 	}
 }
 
@@ -303,7 +303,7 @@ func guildSoundPlayer(
 	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
 	previousInstanceWaitChan <-chan bool,
 ) {
-	log.Println("Soundhandler not active, activating")
+	log.Info().Msg("Soundhandler not active, activating")
 
 	if previousInstanceWaitChan != nil {
 		<-previousInstanceWaitChan
@@ -321,7 +321,7 @@ func guildSoundPlayer(
 	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
 	if err != nil {
 		mediaReturnRequestChan <- guildID
-		log.Println("Couldn't initialise voice connection")
+		log.Info().Msg("Couldn't initialise voice connection")
 		return
 	}
 
@@ -335,17 +335,17 @@ mainLoop:
 		disconnectTimer.Reset(5 * time.Second)
 		select {
 		case song := <-nextSong:
-			log.Println("song link:", song)
+			log.Info().Str("song link:", song).Msg("")
 			encode, download, err := makeSongSession(song)
 			streamingSession := newStreamingSession(encode, vc)
 			if err != nil {
-				log.Println("streamingSession", err)
+				log.Error().Err(err).Msg("")
 				return
 			}
 
 			vc.Speaking(true)
 
-			log.Println("started stream")
+			log.Info().Msg("started stream")
 
 			streamingSession.Start()
 
@@ -356,7 +356,8 @@ mainLoop:
 
 				case err := <-streamingSession.done:
 					vc.Speaking(false)
-					log.Println("Finished Song; reason: ", err)
+
+					log.Error().Err(err).Msg("Finished Song")
 					break
 
 				case control := <-controlChannel:

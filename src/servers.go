@@ -2,9 +2,9 @@ package strife
 
 import (
 	"context"
-	"log"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/api/iterator"
 )
 
@@ -24,11 +24,13 @@ type server struct {
 	ID       string
 }
 
-func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*server {
+func buildServerData(ctx context.Context, s *discordgo.Session) (map[string]*server, error) {
+
+	// log := log.With().Caller().Logger()
 
 	svs := make(map[string]*serverl)
 
-	log.Println("Getting Server info from Database")
+	log.Info().Msg("Getting Server info from Database")
 
 	// Get server data from database
 	iter := bot.client.Collection("servers").Documents(ctx)
@@ -38,17 +40,17 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 			break
 		}
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		var s2 serverl
 		err = doc.DataTo(&s2)
 		if err != nil {
-			log.Printf("%v", err)
+			return nil, err
 		}
 		svs[doc.Ref.ID] = &s2
 	}
-	log.Println("Updating server info from Discord")
+	log.Info().Msg("Updating server info from Discord")
 	// Update retrieved data with values which have changed since the database was last updated
 	for _, v := range svs {
 		guildID := v.ID
@@ -57,11 +59,11 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 			"roles": roles,
 		})
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
-	log.Println("Creating newly found servers")
+	log.Info().Msg("Creating newly found servers")
 	// Create new entries for servers which were not previously in the database
 	guilds, _ := s.UserGuilds(100, "", "")
 	for _, v := range guilds {
@@ -75,7 +77,7 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 			}
 			_, err := bot.client.Collection("servers").Doc(v.ID).Set(ctx, *svs[v.ID])
 			if err != nil {
-				panic(err)
+				return nil, err
 			}
 		}
 	}
@@ -92,6 +94,6 @@ func buildServerData(ctx context.Context, s *discordgo.Session) map[string]*serv
 		}
 	}
 
-	return sss
+	return sss, nil
 
 }
