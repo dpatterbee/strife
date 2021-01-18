@@ -2,7 +2,6 @@ package strife
 
 import (
 	"errors"
-	"io"
 	"sync"
 	"time"
 
@@ -69,11 +68,11 @@ func (s *streamSession) stream() {
 		}
 		err := s.readNext()
 		if err != nil {
-			if err != io.EOF {
-				go func() {
-					s.done <- err
-				}()
-			}
+			go func() {
+				s.done <- err
+			}()
+			// if err != io.EOF {
+			// }
 			s.Lock()
 			s.streaming = false
 			s.Unlock()

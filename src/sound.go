@@ -1,7 +1,6 @@
 package strife
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/dpatterbee/strife/bufferedpipe"
 	"github.com/jonas747/dca"
 )
 
@@ -231,7 +231,7 @@ func isURL(s string) bool {
 }
 
 // streamSong uses youtube-dl to download the song and pipe the stream of data to w
-func streamSong(writePipe io.Writer, s string, d *downloadSession) {
+func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 	ytdlArgs := []string{
 		"-o", "-",
 	}
@@ -254,21 +254,19 @@ func streamSong(writePipe io.Writer, s string, d *downloadSession) {
 	if err != nil {
 		log.Println("ytdl wait", err)
 	}
+	writePipe.Close()
 }
 
 func makeSongSession(s string) (*dca.EncodeSession, *downloadSession, error) {
 
-	readPipe, writePipe := io.Pipe()
-
-	bufferedReadPipe := bufio.NewReader(readPipe)
-	bufferedWritePipe := bufio.NewWriter(writePipe)
+	bufPipe := bufferedpipe.New()
 
 	var d downloadSession
 
 	d.Lock()
-	go streamSong(bufferedWritePipe, s, &d)
+	go streamSong(bufPipe, s, &d)
 
-	ss, err := dca.EncodeMem(bufferedReadPipe, dca.StdEncodeOptions)
+	ss, err := dca.EncodeMem(bufPipe, dca.StdEncodeOptions)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -357,7 +355,7 @@ mainLoop:
 				case err := <-streamingSession.done:
 					vc.Speaking(false)
 					log.Println("Finished Song; reason: ", err)
-					break
+					break controlLoop
 
 				case control := <-controlChannel:
 
