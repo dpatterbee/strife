@@ -1,12 +1,11 @@
 package strife
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"os/exec"
 	"regexp"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/dpatterbee/strife/bufferedpipe"
 	"github.com/jonas747/dca"
+	youtube "github.com/kkdai/youtube/v2"
 )
 
 const (
@@ -56,7 +56,7 @@ type mediaCommand struct {
 }
 
 type downloadSession struct {
-	process *os.Process
+	cancel context.CancelFunc
 	sync.Mutex
 }
 
@@ -232,28 +232,33 @@ func isURL(s string) bool {
 
 // streamSong uses youtube-dl to download the song and pipe the stream of data to w
 func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
-	ytdlArgs := []string{
-		"-o", "-",
-	}
 
-	ytdlArgs = append(ytdlArgs, s)
-
-	ytdl := exec.Command("youtube-dl", ytdlArgs...)
-
-	ytdl.Stdout = writePipe
-
-	err := ytdl.Start()
+	client := youtube.Client{}
+	video, err := client.GetVideo(s)
 	if err != nil {
-		log.Println("ytdl start", err)
+		log.Println("err", err)
+		writePipe.Close()
 		return
 	}
-	d.process = ytdl.Process
+
+	// resp, err := client.GetStream(video, &video.Formats[0])
+	ctx, cancel := context.WithCancel(context.Background())
+	resp, err := client.GetStreamContext(ctx, video, &video.Formats[0])
+	if err != nil {
+		log.Println("err", err)
+		cancel()
+		writePipe.Close()
+		return
+	}
+	defer resp.Body.Close()
+	d.cancel = cancel
 	d.Unlock()
 
-	err = ytdl.Wait()
+	_, err = io.Copy(writePipe, resp.Body)
 	if err != nil {
-		log.Println("ytdl wait", err)
+		log.Println("err", err)
 	}
+	log.Println("pipeclose")
 	writePipe.Close()
 }
 
@@ -379,7 +384,7 @@ mainLoop:
 						streamingSession.skip <- true
 
 						download.Lock()
-						download.process.Kill()
+						download.cancel()
 						download.Unlock()
 						encode.Cleanup()
 
@@ -394,7 +399,7 @@ mainLoop:
 						go trySend(control.returnChannel, "Goodbye.", standardTimeout)
 						streamingSession.stop <- true
 						download.Lock()
-						download.process.Kill()
+						download.cancel()
 						download.Unlock()
 						encode.Cleanup()
 						break mainLoop

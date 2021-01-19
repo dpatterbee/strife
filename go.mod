@@ -7,9 +7,9 @@ require (
 	cloud.google.com/go/firestore v1.3.0
 	github.com/bwmarrin/discordgo v0.22.0
 	github.com/google/go-cmp v0.5.3 // indirect
-	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/jonas747/dca v0.0.0-20201113050843-65838623978b
 	github.com/jonas747/ogg v0.0.0-20161220051205-b4f6f4cf3757 // indirect
+	github.com/kkdai/youtube/v2 v2.3.0
 	golang.org/x/crypto v0.0.0-20201117144127-c1f2f97bffc9 // indirect
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b // indirect
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58 // indirect

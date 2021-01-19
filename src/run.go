@@ -42,7 +42,6 @@ func Run(args []string) int {
 		log.Println("Setup Error:", err)
 		return 1
 	}
-	defer bot.close()
 
 	// Build commands and server map
 	bot.servers = buildServerData(ctx, bot.session)
@@ -64,6 +63,7 @@ func Run(args []string) int {
 		log.Println("Error opening discord connection", err)
 		return 1
 	}
+	defer bot.close()
 	log.Println("Discord connection opened")
 
 	bot.mediaControllerChannel = createMainMediaController(bot.session)
