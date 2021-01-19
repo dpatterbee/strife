@@ -6,12 +6,11 @@ COPY go.mod go.sum ./
 RUN go mod download -x
 COPY *.go ./
 COPY ./src/*.go ./src/
+COPY ./bufferedpipe/*.go ./bufferedpipe/
 RUN go build -v -o /out/strife .
 
 FROM python:3.9-alpine AS bin
 RUN apk add ffmpeg
-RUN wget https://yt-dl.org/downloads/latest/youtube-dl -O /usr/local/bin/youtube-dl
-RUN chmod a+rx /usr/local/bin/youtube-dl
 COPY creds.yml .
 COPY --from=build /out/strife .
 CMD ["./strife"]
