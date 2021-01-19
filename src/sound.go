@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"regexp"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/dpatterbee/strife/bufferedpipe"
 	"github.com/jonas747/dca"
 	youtube "github.com/kkdai/youtube/v2"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -236,7 +236,7 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 	client := youtube.Client{}
 	video, err := client.GetVideo(s)
 	if err != nil {
-		log.Println("err", err)
+		log.Error().Err(err).Msg("")
 		writePipe.Close()
 		return
 	}
@@ -245,7 +245,7 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 	ctx, cancel := context.WithCancel(context.Background())
 	resp, err := client.GetStreamContext(ctx, video, &video.Formats[0])
 	if err != nil {
-		log.Println("err", err)
+		log.Error().Err(err).Msg("")
 		cancel()
 		writePipe.Close()
 		return
@@ -256,9 +256,9 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 
 	_, err = io.Copy(writePipe, resp.Body)
 	if err != nil {
-		log.Println("err", err)
+		log.Error().Err(err).Msg("")
 	}
-	log.Println("pipeclose")
+	log.Info().Msg("pipeclose")
 	writePipe.Close()
 }
 
@@ -306,7 +306,7 @@ func guildSoundPlayer(
 	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
 	previousInstanceWaitChan <-chan bool,
 ) {
-	log.Println("Soundhandler not active, activating")
+	log.Info().Msg("Soundhandler not active, activating")
 
 	if previousInstanceWaitChan != nil {
 		<-previousInstanceWaitChan
@@ -324,7 +324,7 @@ func guildSoundPlayer(
 	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
 	if err != nil {
 		mediaReturnRequestChan <- guildID
-		log.Println("Couldn't initialise voice connection")
+		log.Info().Msg("Couldn't initialise voice connection")
 		return
 	}
 
@@ -338,17 +338,23 @@ mainLoop:
 		disconnectTimer.Reset(5 * time.Second)
 		select {
 		case song := <-nextSong:
-			log.Println("song link:", song)
+			log.Info().
+				Str("URL", song).
+				Str("guildID", guildID).
+				Msg("Playing Song")
 			encode, download, err := makeSongSession(song)
 			streamingSession := newStreamingSession(encode, vc)
 			if err != nil {
-				log.Println("streamingSession", err)
+				log.Error().Err(err).Msg("")
 				return
 			}
 
 			vc.Speaking(true)
 
-			log.Println("started stream")
+			log.Info().
+				Str("guildID", guildID).
+				Str("channelID", channelID).
+				Msg("Starting Audio Stream")
 
 			streamingSession.Start()
 
@@ -359,7 +365,11 @@ mainLoop:
 
 				case err := <-streamingSession.done:
 					vc.Speaking(false)
-					log.Println("Finished Song; reason: ", err)
+					if err == io.EOF {
+						log.Info().Msg("Song Completed.")
+					} else {
+						log.Error().Err(err).Msg("Song Stopped")
+					}
 					break controlLoop
 
 				case control := <-controlChannel:
