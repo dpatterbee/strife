@@ -6,23 +6,28 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
 
 type strifeBot struct {
-	servers         map[string]*server
-	defaultCommands map[string]dfc
-	client          *firestore.Client
-	session         *discordgo.Session
+	servers                map[string]*server
+	defaultCommands        map[string]botCommand
+	mediaControllerChannel chan mediaRequest
+	client                 *firestore.Client
+	session                *discordgo.Session
 }
+
+const standardTimeout = time.Millisecond * 500
 
 var bot strifeBot
 var ctx context.Context
@@ -30,37 +35,50 @@ var ctx context.Context
 // Run starts strife
 func Run(args []string) int {
 
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Logger = log.With().Caller().Logger()
+
 	ctx = context.Background()
 
 	// Create bot discord session and firestore client
 	err := bot.fromArgs(args)
 	if err != nil {
-		log.Println("Setup Error:", err)
+		log.Error().Err(err).Msg("Error creating bot from args.")
 		return 1
 	}
-	defer bot.close()
 
 	// Build commands and server map
-	bot.servers = buildServerData(ctx, bot.session)
+	bot.servers, err = buildServerData(ctx, bot.session)
+	if err != nil {
+		log.Error().Err(err).Msg("Error building Server Data")
+		return 1
+	}
 	bot.defaultCommands = makeDefaultCommands()
 
 	// Add event handlers to discordgo session https://discord.com/developers/docs/topics/gateway#commands-and-events-gateway-events
-	log.Println("Adding event handlers to discordgo session")
+	log.Info().Msg("Adding event handlers to discordgo session")
 	bot.session.AddHandler(ready)
 	bot.session.AddHandler(messageCreate)
 	bot.session.AddHandler(guildRoleCreate)
 	bot.session.AddHandler(guildRoleUpdate)
 
+	bot.session.Identify.Intents = nil
+
 	// Open Discord connection
-	log.Println("Opening discord connection")
+	log.Info().Msg("Opening discord connection")
 	err = bot.session.Open()
 	if err != nil {
-		log.Println("Error opening discord connection", err)
+		log.Error().Err(err).Msg("")
 		return 1
 	}
-	log.Println("Discord connection opened")
+	defer bot.close()
+	log.Info().Msg("Discord connection opened")
 
-	log.Println("Setup Complete")
+	bot.mediaControllerChannel = createMainMediaController(bot.session)
+
+	log.Info().Msg("Setup Complete")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
@@ -81,7 +99,7 @@ func (b *strifeBot) fromArgs(args []string) error {
 		ID    string
 	}{}
 
-	dat, err := ioutil.ReadFile("creds.yml")
+	dat, err := ioutil.ReadFile("./creds.yml")
 	if err != nil {
 		return err
 	}
@@ -117,14 +135,14 @@ func (b *strifeBot) fromArgs(args []string) error {
 		projectID = &proji
 	}
 
-	log.Println("Creating Discord Session")
+	log.Info().Msg("Creating Discord Session")
 	dg, err := discordgo.New("Bot " + *token)
 	if err != nil {
 		return fmt.Errorf("Error creating discord session: %v", err)
 	}
 	b.session = dg
 
-	log.Println("Creating Firestore Client")
+	log.Info().Msg("Creating Firestore Client")
 	client, err := firestore.NewClient(ctx, *projectID)
 	if err != nil {
 		return fmt.Errorf("Error creating Firestore Client: %v", err)
@@ -141,7 +159,7 @@ func (b *strifeBot) close() {
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 	err := s.UpdateStatus(0, "dev")
 	if err != nil {
-		fmt.Println(err)
+		log.Error().Err(err).Msg("")
 	}
 }
 
@@ -155,7 +173,7 @@ func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
 
 	_, err := updateServers(guildID, data)
 	if err != nil {
-		panic(err)
+		log.Error().Err(err).Msg("")
 	}
 
 }
@@ -170,7 +188,7 @@ func guildRoleUpdate(s *discordgo.Session, r *discordgo.GuildRoleUpdate) {
 
 	_, err := updateServers(guildID, data)
 	if err != nil {
-		panic(err)
+		log.Error().Err(err).Msg("")
 	}
 }
 
@@ -188,7 +206,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	content := strings.TrimPrefix(m.Content, currentServer.Prefix)
 
 	splitContent := strings.Split(content, " ")
-	content = strings.TrimPrefix(content, splitContent[0]+" ")
+	if len(splitContent) == 1 {
+		content = ""
+	} else {
+		content = strings.TrimPrefix(content, splitContent[0]+" ")
+	}
 
 	var response string
 
@@ -209,15 +231,25 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			response = err.Error()
 		}
 	} else {
-		response, _ = currentServer.Commands[splitContent[0]]
+		response = currentServer.Commands[splitContent[0]]
 	}
 
 	if response != "" {
+		response = "**" + response + "**"
 		message, err := s.ChannelMessageSend(m.ChannelID, response)
 		if err != nil {
-			panic(err)
+			log.Error().
+				Err(err).
+				Str("msg", message.ContentWithMentionsReplaced()).
+				Str("author", message.Author.String()).
+				Str("channelID", message.ChannelID).
+				Msg("")
 		}
-		log.Println(message.ContentWithMentionsReplaced(), message.Author, message.ChannelID, message.GuildID)
+		log.Info().
+			Str("msg", message.ContentWithMentionsReplaced()).
+			Str("author", message.Author.String()).
+			Str("channelID", message.ChannelID).
+			Msg("")
 	}
 
 }
@@ -243,4 +275,25 @@ func getServerRoles(s *discordgo.Session, i string) map[string]int64 {
 	}
 
 	return m
+}
+
+// trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
+func trySend(channel chan string, data string, timeoutDuration time.Duration) {
+	// this will sure lend itself to generics when the time comes.
+	timeout := time.NewTimer(timeoutDuration)
+
+	select {
+	case channel <- data:
+		timeout.Stop()
+	case <-timeout.C:
+		return
+	}
+}
+
+func createMainMediaController(sess *discordgo.Session) chan mediaRequest {
+	ch := make(chan mediaRequest)
+
+	go mediaControlRouter(sess, ch)
+
+	return ch
 }

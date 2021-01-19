@@ -3,17 +3,14 @@ package strife
 import (
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jonas747/dca"
 )
 
-type dfc struct {
+type botCommand struct {
 	command    string
 	function   defCommand
 	permission int
@@ -29,7 +26,7 @@ const (
 
 type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
 
-var something = []dfc{
+var something = []botCommand{
 	{
 		command: "marco", function: polo, permission: botunknown,
 	},
@@ -54,10 +51,25 @@ var something = []dfc{
 	{
 		command: "play", function: playSound, permission: botunknown,
 	},
+	{
+		command: "pause", function: pauseSound, permission: botunknown,
+	},
+	{
+		command: "resume", function: resumeSound, permission: botunknown,
+	},
+	{
+		command: "skip", function: skipSound, permission: botunknown,
+	},
+	{
+		command: "disconnect", function: disconnectVoice, permission: botunknown,
+	},
+	{
+		command: "queue", function: inspectQueue, permission: botunknown,
+	},
 }
 
-func makeDefaultCommands() map[string]dfc {
-	cmds := make(map[string]dfc)
+func makeDefaultCommands() map[string]botCommand {
+	cmds := make(map[string]botCommand)
 
 	for _, v := range something {
 		cmds[v.command] = v
@@ -67,42 +79,41 @@ func makeDefaultCommands() map[string]dfc {
 }
 
 func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
-	log.Println("setting up sound")
-	guildID := m.GuildID
 
-	sound := getSound(s)
-	defer sound.Cleanup()
+	resultChan := make(chan string)
 
-	channelID, err := getUserVoiceChannel(sess, m)
+	userVoiceChannel, err := getUserVoiceChannel(sess, m.Author.ID, m.GuildID)
 	if err != nil {
-		return "", err
+		return "You need to be in a voice channel to use this command.", nil
+	}
+	var req mediaRequest
+
+	s = strings.TrimSpace(s)
+	if len(s) > 0 {
+		req = mediaRequest{commandType: play, guildID: m.GuildID, commandData: s, returnChannel: resultChan, channelID: userVoiceChannel}
+	} else {
+		req = mediaRequest{commandType: resume, guildID: m.GuildID, commandData: s, returnChannel: resultChan, channelID: userVoiceChannel}
 	}
 
-	vc, err := sess.ChannelVoiceJoin(guildID, channelID, false, true)
-	if err != nil {
-		return "", err
+	timeout := time.NewTimer(standardTimeout)
+
+	select {
+	case bot.mediaControllerChannel <- req:
+		// Not sure if this is actually required
+		if !timeout.Stop() {
+			<-timeout.C
+		}
+	case <-timeout.C:
+		return "Server busy, please try again", nil
 	}
 
-	time.Sleep(250 * time.Millisecond)
-
-	vc.Speaking(true)
-
-	done := make(chan error)
-
-	dca.NewStream(sound, vc, done)
-
-	err = <-done
-
-	vc.Speaking(false)
-
-	time.Sleep(10 * time.Second)
-	vc.Disconnect()
-
-	if err != nil && err != io.EOF {
-		return "", err
+	timeout.Reset(10 * time.Second)
+	select {
+	case result := <-resultChan:
+		return result, nil
+	case <-timeout.C:
+		return "", nil
 	}
-
-	return "", nil
 }
 
 func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
@@ -191,6 +202,10 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 		return "Prefix must be a single word", nil
 	}
 
+	if len(s) > 10 {
+		return "Prefix must be 10 or fewer characters", nil
+	}
+
 	bot.servers[guildID].Prefix = s
 
 	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
@@ -236,5 +251,152 @@ func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 	}
 
 	return highestPermission
+
+}
+
+func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	if err != nil {
+		return "You must be in a voice channel to pause the song", nil
+	}
+
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: pause, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout.Reset(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request sent", nil
+	}
+
+}
+
+func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	if err != nil {
+		return "You must be in a voice channel to resume the song", nil
+	}
+
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: resume, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout.Reset(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request sent", nil
+	}
+}
+
+func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	if err != nil {
+		return "You must be in a voice channel to skip the song", nil
+	}
+
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: skip, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout.Reset(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request sent", nil
+	}
+
+}
+
+func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+
+	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	if err != nil {
+		return "You must be in a voice channel to skip the song", nil
+	}
+
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: disconnect, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout.Reset(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request sent", nil
+	}
+
+}
+
+func inspectQueue(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+	ch := make(chan string)
+
+	req := mediaRequest{commandType: inspect, guildID: m.GuildID, channelID: "", returnChannel: ch}
+
+	timeout := time.NewTimer(standardTimeout)
+	select {
+	case bot.mediaControllerChannel <- req:
+		timeout.Stop()
+	case <-timeout.C:
+		return "Servers busy !", nil
+	}
+
+	timeout = time.NewTimer(10 * time.Second)
+	select {
+	case result := <-ch:
+		timeout.Stop()
+		return result, nil
+	case <-timeout.C:
+		return "Request send", nil
+	}
 
 }

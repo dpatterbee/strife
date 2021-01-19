@@ -1,7 +1,7 @@
 FROM golang:1.15.2-alpine AS build
 
 WORKDIR /go/src/strife
-
+ENV CGO_ENABLED=0
 COPY go.mod go.sum ./
 RUN go mod download -x
 COPY *.go ./
@@ -14,4 +14,4 @@ RUN wget https://yt-dl.org/downloads/latest/youtube-dl -O /usr/local/bin/youtube
 RUN chmod a+rx /usr/local/bin/youtube-dl
 COPY creds.yml .
 COPY --from=build /out/strife .
-CMD ["/strife"]
+CMD ["./strife"]
