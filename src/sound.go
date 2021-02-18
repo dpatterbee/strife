@@ -258,7 +258,7 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
-	log.Info().Msg("pipeclose")
+	log.Info().Msg("Download finished")
 	writePipe.Close()
 }
 
