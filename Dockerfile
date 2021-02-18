@@ -6,7 +6,6 @@ COPY go.mod go.sum ./
 RUN go mod download -x
 COPY *.go ./
 COPY ./src/*.go ./src/
-COPY ./bufferedpipe/*.go ./bufferedpipe/
 RUN go build -v -o /out/strife .
 
 FROM alpine AS bin
