@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -99,7 +98,7 @@ func (b *strifeBot) fromArgs(args []string) error {
 		ID    string
 	}{}
 
-	dat, err := ioutil.ReadFile("./creds.yml")
+	dat, err := os.ReadFile("./creds.yml")
 	if err != nil {
 		return err
 	}
