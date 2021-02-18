@@ -1,4 +1,4 @@
-FROM golang:1.15.2-alpine AS build
+FROM golang:alpine AS build
 
 WORKDIR /go/src/strife
 ENV CGO_ENABLED=0
