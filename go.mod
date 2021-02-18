@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go v0.72.0 // indirect
 	cloud.google.com/go/firestore v1.3.0
 	github.com/bwmarrin/discordgo v0.22.0
+	github.com/dpatterbee/bpipe v0.0.0-20210218180003-4e0bcc98c7b3
 	github.com/google/go-cmp v0.5.3 // indirect
 	github.com/jonas747/dca v0.0.0-20201113050843-65838623978b
 	github.com/jonas747/ogg v0.0.0-20161220051205-b4f6f4cf3757 // indirect

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/dpatterbee/strife/bufferedpipe"
+	"github.com/dpatterbee/bpipe"
 	"github.com/jonas747/dca"
 	youtube "github.com/kkdai/youtube/v2"
 	"github.com/rs/zerolog/log"
@@ -264,7 +264,7 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 
 func makeSongSession(s string) (*dca.EncodeSession, *downloadSession, error) {
 
-	bufPipe := bufferedpipe.New()
+	bufPipe := bpipe.New()
 
 	var d downloadSession
 
