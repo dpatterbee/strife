@@ -96,7 +96,7 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 				ch, ok := activeMediaChannels[elem.guildID]
 				if !ok {
 					controlChannel := make(chan mediaCommand)
-					songChannel := make(chan string, 100) // This serves as a song queue. Which in hindsight is pretty terrible as I do not believe it can be inspected. TODO: Fix this.
+					songChannel := make(chan string, 100)
 					activeMediaChannels[elem.guildID] = activeMediaChannel{
 						controlChannel: controlChannel,
 						songChannel:    songChannel,
@@ -146,6 +146,8 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 				mc, ok := activeMediaChannels[elem.guildID]
 
 				if ok {
+					//TODO: There's definitely a potential scenario where this never properly sends the disconnect signal and we end up with
+					//a zombie goroutine holding onto a voiceconnection for a while.
 					go func(mc activeMediaChannel) {
 						timeout := time.NewTimer(10 * time.Minute)
 						select {
@@ -241,7 +243,6 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 		return
 	}
 
-	// resp, err := client.GetStream(video, &video.Formats[0])
 	ctx, cancel := context.WithCancel(context.Background())
 	resp, err := client.GetStreamContext(ctx, video, &video.Formats[0])
 	if err != nil {
@@ -258,7 +259,7 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
-	log.Info().Msg("pipeclose")
+	log.Info().Msg("Finished download.")
 	writePipe.Close()
 }
 
@@ -320,11 +321,9 @@ func guildSoundPlayer(
 	// Set up voiceconnection
 	vc, err := discordSession.ChannelVoiceJoin(guildID, channelID, false, true)
 
-	//TODO: improve how this handles songs that have been requested and such after we fix song queues
-	// If after 20 retries we still have not achieved a connection we will close this goroutine and tell the router that we are closed.
 	if err != nil {
 		mediaReturnRequestChan <- guildID
-		log.Info().Msg("Couldn't initialise voice connection")
+		log.Error().Err(err).Msg("Couldn't initialise voice connection")
 		return
 	}
 
