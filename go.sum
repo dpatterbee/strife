@@ -73,6 +73,8 @@ github.com/dgrijalva/jwt-go v3.2.0+incompatible/go.mod h1:E3ru+11k8xSBh+hMPgOLZm
 github.com/dgryski/go-sip13 v0.0.0-20181026042036-e10d5fee7954/go.mod h1:vAd38F8PWV+bWy6jNmig1y/TA+kYO4g3RSRF0IAv0no=
 github.com/dpatterbee/bpipe v0.0.0-20210218180003-4e0bcc98c7b3 h1:eSqgexzdgReroqfFTKohBlTu8n+1AtxvOsAh0xQk7so=
 github.com/dpatterbee/bpipe v0.0.0-20210218180003-4e0bcc98c7b3/go.mod h1:fVbvnsYwSEghJCpp6qJFJdGcTcz5PdfDkEtqu8DI6kU=
+github.com/dpatterbee/bpipe v0.1.0 h1:gcNK8zDZ9+/fzm3uZ5JBaXw9YCEDT2Z1QjWFyki0m58=
+github.com/dpatterbee/bpipe v0.1.0/go.mod h1:fVbvnsYwSEghJCpp6qJFJdGcTcz5PdfDkEtqu8DI6kU=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
@@ -190,6 +192,10 @@ github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvW
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/kkdai/youtube/v2 v2.3.0 h1:tIbursDbJ6ZYEtLfVBq3c6yWhi/QcuktY6KdbdoDJpc=
 github.com/kkdai/youtube/v2 v2.3.0/go.mod h1:61FfODSvBAKWzaRobNneXgVG8ywjIh3vcFKZYz5zoTA=
+github.com/kkdai/youtube/v2 v2.4.1 h1:7NpsJO/9m11Zd/2BYu0C8Fa1eoVLwpfjdv2+ue/Ozck=
+github.com/kkdai/youtube/v2 v2.4.1/go.mod h1:61FfODSvBAKWzaRobNneXgVG8ywjIh3vcFKZYz5zoTA=
+github.com/kkdai/youtube/v2 v2.4.2-0.20210224214309-6130064fdb1e h1:hrI67cgsQhO+D/8N8DUOUFABxLNbscOdKV05DWxDTa4=
+github.com/kkdai/youtube/v2 v2.4.2-0.20210224214309-6130064fdb1e/go.mod h1:61FfODSvBAKWzaRobNneXgVG8ywjIh3vcFKZYz5zoTA=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
 github.com/kr/logfmt v0.0.0-20140226030751-b84e30acd515/go.mod h1:+0opPa2QZZtGFBFZlji/RkVcI2GknAs/DXo4wKdlNEc=
 github.com/kr/pretty v0.1.0 h1:L/CwN0zerZDmRFUapSPitk6f+Q3+0za1rQkzVuMiMFI=

@@ -1,7 +1,6 @@
 package strife
 
 import (
-	"errors"
 	"sync"
 	"time"
 
@@ -14,9 +13,9 @@ type streamSession struct {
 
 	stop chan bool
 	done chan error
-	skip chan bool
 
-	source dca.OpusReader
+	source     dca.OpusReader
+	framesSent int
 
 	streaming bool
 
@@ -30,7 +29,6 @@ func newStreamingSession(source dca.OpusReader, vc *discordgo.VoiceConnection) *
 		source: source,
 		done:   make(chan error),
 		stop:   make(chan bool),
-		skip:   make(chan bool),
 	}
 
 	return session
@@ -55,14 +53,6 @@ func (s *streamSession) stream() {
 			s.Lock()
 			s.streaming = false
 			s.Unlock()
-			return
-		case <-s.skip:
-			s.Lock()
-			s.streaming = false
-			s.Unlock()
-			go func() {
-				s.done <- errors.New("User Interrupt")
-			}()
 			return
 		default:
 		}
@@ -97,47 +87,45 @@ func (s *streamSession) readNext() error {
 	case s.vc.OpusSend <- opus:
 	}
 
+	s.Lock()
+	s.framesSent++
+	s.Unlock()
+
 	return nil
 }
 
-func (s *streamSession) Pause() {
+func (s *streamSession) Streaming() bool {
 	s.RLock()
-	if !s.streaming {
-		return
-	}
-	s.RUnlock()
-
-	timeout := time.After(5 * time.Second)
-
-	select {
-	case <-timeout:
-	case s.stop <- true:
-	}
+	defer s.RUnlock()
+	return s.streaming
 }
 
-func (s *streamSession) Resume() {
-
-	s.RLock()
-	if s.streaming {
-		return
-	}
-	s.RUnlock()
-
-	go s.stream()
+// Due to the nature of the streamSession, the only difference between pausing and
+// stopping a stream is that stopping is typically followed by the discarding of the
+// streamSession itself. Hence Pause is simply an alias of Stop.
+func (s *streamSession) Pause() bool {
+	return s.Stop()
 }
 
-func (s *streamSession) Skip() {
-	s.RLock()
-	if !s.streaming {
-		return
+func (s *streamSession) Stop() bool {
+	if !s.Streaming() {
+		return false
 	}
-	s.RUnlock()
+	s.stop <- true
+	return true
+}
 
-	timeout := time.After(5 * time.Second)
-
-	select {
-	case <-timeout:
-	case s.skip <- true:
+func (s *streamSession) Resume() bool {
+	if s.Streaming() {
+		return false
 	}
 
+	s.Start()
+	return true
+}
+
+func (s *streamSession) PlaybackPos() time.Duration {
+	s.Lock()
+	defer s.Unlock()
+	return time.Duration(s.framesSent) * s.source.FrameDuration()
 }

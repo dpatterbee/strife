@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	lg "log"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +41,6 @@ type mediaSession struct {
 	download *downloadSession
 	encode   *dca.EncodeSession
 	stream   *streamSession
-	stop     chan bool
 }
 
 type mediaRequest struct {
@@ -56,8 +57,13 @@ type mediaCommand struct {
 }
 
 type downloadSession struct {
-	cancel context.CancelFunc
+	cncl context.CancelFunc
 	sync.Mutex
+}
+
+type songRequest struct {
+	URL        string
+	returnChan chan string
 }
 
 // mediaControlRouter function runs perpetually, maintaining a pool of all currently active media sessions.
@@ -65,13 +71,13 @@ type downloadSession struct {
 func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan mediaRequest) {
 
 	type activeMediaChannel struct {
-		songChannel    chan string
+		songChannel    chan songRequest
 		controlChannel chan mediaCommand
 	}
 
 	type dyingMediaChannel struct {
-		dependedOn bool
-		dependency chan bool
+		dependedOn     bool
+		dependencyChan chan bool
 	}
 
 	// activeMediaChannels is a map of channels which are currently serving song requests.
@@ -80,136 +86,124 @@ func mediaControlRouter(session *discordgo.Session, mediaCommandChannel chan med
 	dyingMediaChannels := make(map[string]dyingMediaChannel)
 
 	// These channels are used by guildSoundPlayer goroutines to inform this goroutine of their shutdown status.
-	// mediaReturnChannel is used to inform that it has begun shutting down and that no more song or command requests should be forwarded to that goroutine.
-	// mediaFiniChannel is used to inform that it has completed shutting down and that any waiting goroutines can be released.
-	mediaReturnChannel := make(chan string)
-	mediaFiniChannel := make(chan string)
+	// mediaReturnBegin is used to inform that it has begun shutting down and that no more song or command requests should be forwarded to that goroutine.
+	// mediaReturnEnd is used to inform that it has completed shutting down and that any waiting goroutines can be released.
+	mediaReturnBegin := make(chan string)
+	mediaReturnEnd := make(chan string)
 
 	// This loops for the lifetime of the program, responding to messages sent on each channel.
 	for {
 
 		select {
-		case elem := <-mediaCommandChannel:
-			switch elem.commandType {
+		case request := <-mediaCommandChannel:
+			// play and disconnect are special cases of command, as they can create and destroy channels.
+			// all other commands just get passed through to the respective server.
+			switch request.commandType {
 			case play:
 
-				ch, ok := activeMediaChannels[elem.guildID]
+				ch, ok := activeMediaChannels[request.guildID]
 				if !ok {
-					controlChannel := make(chan mediaCommand)
-					songChannel := make(chan string, 100)
-					activeMediaChannels[elem.guildID] = activeMediaChannel{
-						controlChannel: controlChannel,
-						songChannel:    songChannel,
+					activeMediaChannels[request.guildID] = activeMediaChannel{
+						controlChannel: make(chan mediaCommand, 5),
+						songChannel:    make(chan songRequest, 100),
 					}
 
-					ch = activeMediaChannels[elem.guildID]
+					ch = activeMediaChannels[request.guildID]
+
 					// Checks if there exists a guildSoundPlayer goroutine which is currently dying, and creates the channel required so we can wait for the old goroutine to shut down.
-					if _, ok := dyingMediaChannels[elem.guildID]; ok {
-						dependencyChan := make(chan bool)
-						dyingMediaChannels[elem.guildID] = dyingMediaChannel{dependedOn: true, dependency: dependencyChan}
-
-						go guildSoundPlayer(
-							session,
-							elem.guildID,
-							elem.channelID,
-							controlChannel,
-							songChannel,
-							mediaReturnChannel,
-							mediaFiniChannel,
-							dependencyChan,
-						)
-					} else {
-						go guildSoundPlayer(
-							session,
-							elem.guildID,
-							elem.channelID,
-							controlChannel,
-							songChannel,
-							mediaReturnChannel,
-							mediaFiniChannel,
-							nil,
-						)
+					var dependencyChan chan bool = nil
+					if _, ok := dyingMediaChannels[request.guildID]; ok {
+						dependencyChan = make(chan bool)
+						dyingMediaChannels[request.guildID] = dyingMediaChannel{dependedOn: true, dependencyChan: dependencyChan}
 					}
+					go guildSoundPlayer(
+						session,
+						request.guildID,
+						request.channelID,
+						ch.controlChannel,
+						ch.songChannel,
+						mediaReturnBegin,
+						mediaReturnEnd,
+						dependencyChan,
+					)
 				}
 
-				result := "Song added to queue"
+				songReq := songRequest{
+					URL:        request.commandData,
+					returnChan: request.returnChannel,
+				}
 
 				select {
-				case ch.songChannel <- elem.commandData:
+				case ch.songChannel <- songReq:
 				default:
-					result = "Queue full, please try again later."
+					go trySend(request.returnChannel, "Queue full, please try again later.", standardTimeout)
 				}
 
-				go trySend(elem.returnChannel, result, standardTimeout)
-
 			case disconnect:
-				mc, ok := activeMediaChannels[elem.guildID]
+				mediaChannel, ok := activeMediaChannels[request.guildID]
 
 				if ok {
 					//TODO: There's definitely a potential scenario where this never properly sends the disconnect signal and we end up with
 					//a zombie goroutine holding onto a voiceconnection for a while.
-					go func(mc activeMediaChannel) {
-						timeout := time.NewTimer(10 * time.Minute)
-						select {
-						case mc.controlChannel <- mediaCommand{commandType: disconnect, returnChannel: elem.returnChannel}:
-							timeout.Stop()
-						case <-timeout.C:
+					go passCommandThroughToGuildSoundPlayerWithTimeoutAndClose(mediaChannel.controlChannel, request, 10*time.Minute)
 
-						}
-					}(mc)
-
-					dyingMediaChannels[elem.guildID] = dyingMediaChannel{dependedOn: false, dependency: nil}
-					delete(activeMediaChannels, elem.guildID)
+					dyingMediaChannels[request.guildID] = dyingMediaChannel{dependedOn: false, dependencyChan: nil}
+					delete(activeMediaChannels, request.guildID)
 				}
 
 			default:
-				mc, ok := activeMediaChannels[elem.guildID]
-				go func() {
-					timeout := time.NewTimer(standardTimeout)
-					if ok {
-						select {
-						case mc.controlChannel <- mediaCommand{commandType: elem.commandType, returnChannel: elem.returnChannel}:
-							timeout.Stop()
-							return
-						case <-timeout.C:
-							go trySend(elem.returnChannel, "Serber bisi", standardTimeout)
-							return
-						}
-					}
 
-					go trySend(elem.returnChannel, "No media playing", standardTimeout)
-				}()
-
+				mc, ok := activeMediaChannels[request.guildID]
+				if ok {
+					go passCommandThroughToGuildSoundPlayer(mc.controlChannel, request)
+				}
 			}
-		case guildID := <-mediaReturnChannel:
+		case guildID := <-mediaReturnBegin:
 
 			// When a guildSoundPlayer goroutine informs us that they are beginning to shut down, we close the communications channels and drain them,
 			// then create an entry in our dyingMediaChannels map and remove from activeMediaChannels
-			_, ok := activeMediaChannels[guildID]
+			m, ok := activeMediaChannels[guildID]
+			close(m.controlChannel)
 			if ok {
 				dyingMediaChannels[guildID] = dyingMediaChannel{}
 				delete(activeMediaChannels, guildID)
 			}
-		case guildID := <-mediaFiniChannel:
+		case guildID := <-mediaReturnEnd:
 
-			// When a guildSoundPlayer goroutine informs us that it has completed shutting down, if that shutdown has a dependency, we inform the dependent that
-			// it is now free to go, and we remove it from the map and close the channel. Otherwise we simply remove it from the map.
-			if pp, ok := dyingMediaChannels[guildID]; ok {
-				if pp.dependedOn {
+			// When a guildSoundPlayer goroutine informs us that it has completed shutting down, if that shutdown has a dependency, we close the channel
+			// to let the dependant know it can continue, and we remove it from the map. Otherwise we simply remove it from the map.
+			if dyingChannel, ok := dyingMediaChannels[guildID]; ok {
+				if dyingChannel.dependedOn {
 					go func(ch chan<- bool) {
-						ch <- true
 						close(ch)
-					}(pp.dependency)
-					delete(dyingMediaChannels, guildID)
-				} else {
-					delete(dyingMediaChannels, guildID)
+					}(dyingChannel.dependencyChan)
 				}
+				delete(dyingMediaChannels, guildID)
 			}
 
 		}
 
 	}
 
+}
+func passCommandThroughToGuildSoundPlayer(controlChan chan mediaCommand, elem mediaRequest) {
+	passCommandThroughToGuildSoundPlayerWithTimeout(controlChan, elem, standardTimeout)
+}
+func passCommandThroughToGuildSoundPlayerWithTimeoutAndClose(controlChan chan mediaCommand, elem mediaRequest, timeout time.Duration) {
+	passCommandThroughToGuildSoundPlayerWithTimeout(controlChan, elem, timeout)
+	close(controlChan)
+}
+
+func passCommandThroughToGuildSoundPlayerWithTimeout(controlChan chan mediaCommand, elem mediaRequest, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	select {
+	case controlChan <- mediaCommand{commandType: elem.commandType, returnChannel: elem.returnChannel}:
+		timer.Stop()
+		return
+	case <-timer.C:
+		go trySend(elem.returnChannel, "Serber bisi", standardTimeout)
+		return
+	}
 }
 
 func parseURL(m *discordgo.MessageCreate, s string) (songURL, error) {
@@ -233,15 +227,9 @@ func isURL(s string) bool {
 }
 
 // streamSong uses youtube-dl to download the song and pipe the stream of data to w
-func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
+func streamSong(writePipe io.WriteCloser, video *youtube.Video, d *downloadSession) {
 
 	client := youtube.Client{}
-	video, err := client.GetVideo(s)
-	if err != nil {
-		log.Error().Err(err).Msg("")
-		writePipe.Close()
-		return
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	resp, err := client.GetStreamContext(ctx, video, &video.Formats[0])
@@ -252,18 +240,27 @@ func streamSong(writePipe io.WriteCloser, s string, d *downloadSession) {
 		return
 	}
 	defer resp.Body.Close()
-	d.cancel = cancel
+	d.cncl = cancel
 	d.Unlock()
-
-	_, err = io.Copy(writePipe, resp.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("")
+		log.Info().Msg(err.Error())
 	}
-	log.Info().Msg("Finished download.")
+	_, err = io.Copy(writePipe, resp.Body)
+
+	if err != nil {
+		switch err {
+		case context.Canceled:
+			log.Info().Msg("Download cancelled.")
+		default:
+			log.Error().Err(err).Msg("Data Copy Failed.")
+		}
+	} else {
+		log.Info().Msg("Finished download.")
+	}
 	writePipe.Close()
 }
 
-func makeSongSession(s string) (*dca.EncodeSession, *downloadSession, error) {
+func newSongSession(s *youtube.Video) (*dca.EncodeSession, *downloadSession, error) {
 
 	bufPipe := bpipe.New()
 
@@ -272,12 +269,42 @@ func makeSongSession(s string) (*dca.EncodeSession, *downloadSession, error) {
 	d.Lock()
 	go streamSong(bufPipe, s, &d)
 
+	// Trick the dca module into using my logger with level=warn
+	t := log.With().Str("level", "warn").Logger()
+	dca.Logger = lg.New(t, "", 0)
+
 	ss, err := dca.EncodeMem(bufPipe, dca.StdEncodeOptions)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return ss, &d, nil
+}
+
+func newMediaSession(s *youtube.Video, vc *discordgo.VoiceConnection) (*mediaSession, error) {
+	bufPipe := bpipe.New()
+
+	var d downloadSession
+	d.Lock()
+	go streamSong(bufPipe, s, &d)
+
+	// Trick the dca module into using my logger with level=warn
+	t := log.With().Str("level", "warn").Logger()
+	dca.Logger = lg.New(t, "", 0)
+
+	encode, err := dca.EncodeMem(bufPipe, dca.StdEncodeOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	stream := newStreamingSession(encode, vc)
+
+	return &mediaSession{
+		download: &d,
+		encode:   encode,
+		stream:   stream,
+	}, nil
+
 }
 
 func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (string, error) {
@@ -303,7 +330,7 @@ func guildSoundPlayer(
 	discordSession *discordgo.Session,
 	guildID, channelID string,
 	controlChannel <-chan mediaCommand,
-	songChannel <-chan string,
+	songChannel <-chan songRequest,
 	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
 	previousInstanceWaitChan <-chan bool,
 ) {
@@ -313,10 +340,14 @@ func guildSoundPlayer(
 		<-previousInstanceWaitChan
 	}
 
-	nextSong := make(chan string)
-	inspectSongQueue := make(chan chan []string)
-	queueShutDown := make(chan chan []string)
-	go songQueue(songChannel, nextSong, inspectSongQueue, queueShutDown)
+	nextSong, inspectSongQueue, queueShutDown, firstSongWait := newSongQueue(songChannel)
+
+	if !<-firstSongWait {
+		log.Info().Msg("Initial song request too long, shutting down.")
+		mediaReturnRequestChan <- guildID
+		mediaReturnFinishChan <- guildID
+		return
+	}
 
 	// Set up voiceconnection
 	vc, err := discordSession.ChannelVoiceJoin(guildID, channelID, false, true)
@@ -336,13 +367,23 @@ mainLoop:
 		}
 		disconnectTimer.Reset(5 * time.Second)
 		select {
+		case control := <-controlChannel:
+			switch control.commandType {
+			case disconnect:
+				go trySend(control.returnChannel, "Goodbye.", standardTimeout)
+				break mainLoop
+			default:
+				go trySend(control.returnChannel, "No media playing.", standardTimeout)
+			}
 		case song := <-nextSong:
 			log.Info().
-				Str("URL", song).
+				Str("URL", song.ID).
+				Str("Title", song.Title).
 				Str("guildID", guildID).
 				Msg("Playing Song")
-			encode, download, err := makeSongSession(song)
-			streamingSession := newStreamingSession(encode, vc)
+			//encode, download, err := newSongSession(song)
+			//streamingSession := newStreamingSession(encode, vc)
+			mediaSession, err := newMediaSession(song, vc)
 			if err != nil {
 				log.Error().Err(err).Msg("")
 				return
@@ -355,19 +396,20 @@ mainLoop:
 				Str("channelID", channelID).
 				Msg("Starting Audio Stream")
 
-			streamingSession.Start()
+			mediaSession.stream.Start()
 
-			// controlLoop should only be entered once it is possible to control the media ie. once the ffmpeg and youtube-dl sessions are up and running
+			// controlLoop should only be entered once it is possible to control the media ie. once the ffmpeg session is up and running
 		controlLoop:
 			for {
 				select {
 
-				case err := <-streamingSession.done:
+				case err := <-mediaSession.stream.done:
 					vc.Speaking(false)
+					mediaSession.stop() // Ensure the song cleans up okay.
 					if err == io.EOF {
 						log.Info().Msg("Song Completed.")
 					} else {
-						log.Error().Err(err).Msg("Song Stopped")
+						log.Error().Err(err).Msg("Song Stopped.")
 					}
 					break controlLoop
 
@@ -376,48 +418,51 @@ mainLoop:
 					switch control.commandType {
 
 					case pause:
-						streamingSession.stop <- true
-						go trySend(control.returnChannel, "Song paused.", standardTimeout)
+						ok := mediaSession.pause()
+						if ok {
+							go trySend(control.returnChannel, "Song paused.", standardTimeout)
+						} else {
+							go trySend(control.returnChannel, "Song already paused.", standardTimeout)
+						}
 
 					case resume:
-						go streamingSession.stream()
-						go trySend(control.returnChannel, "Song resumed.", standardTimeout)
+						ok := mediaSession.resume()
+						if ok {
+							go trySend(control.returnChannel, "Song resumed.", standardTimeout)
+						} else {
+							go trySend(control.returnChannel, "Song already playing", standardTimeout)
+						}
 
 					case skip:
-						if !encode.Running() {
+						if !mediaSession.encode.Running() {
 							go trySend(control.returnChannel, "Not yet.", standardTimeout)
 							continue
 
 						}
-						go trySend(control.returnChannel, "Song skipped.", standardTimeout)
-						streamingSession.skip <- true
+						mediaSession.stop()
 
-						download.Lock()
-						download.cancel()
-						download.Unlock()
-						encode.Cleanup()
+						go trySend(control.returnChannel, "Song skipped.", standardTimeout)
 
 						break controlLoop
 
 					case disconnect:
-						if !encode.Running() {
+						if !mediaSession.encode.Running() {
 							go trySend(control.returnChannel, "Not yet.", standardTimeout)
 							continue
 
 						}
+						mediaSession.stop()
+
 						go trySend(control.returnChannel, "Goodbye.", standardTimeout)
-						streamingSession.stop <- true
-						download.Lock()
-						download.cancel()
-						download.Unlock()
-						encode.Cleanup()
+
 						break mainLoop
 
 					case inspect:
-						qch := make(chan []string)
+						qch := make(chan []*youtube.Video)
 						inspectSongQueue <- qch
 						q := <-qch
-						go trySend(control.returnChannel, fmt.Sprint(q), standardTimeout)
+						currentSongTimeRemaining := song.Duration - mediaSession.stream.PlaybackPos()
+						go trySend(control.returnChannel, makePrettySongList(q, currentSongTimeRemaining), standardTimeout)
 					}
 				}
 			}
@@ -432,7 +477,7 @@ mainLoop:
 
 	// End queue goroutine and disconnect from voice channel before informing the coordinator that we have finished.
 	// TODO: I have implemented the potential for returning the queue after a session ends. This could be recovered afterwards.
-	remainingQ := make(chan []string)
+	remainingQ := make(chan []*youtube.Video)
 	queueShutDown <- remainingQ
 	<-remainingQ
 	vc.Disconnect()
@@ -440,40 +485,100 @@ mainLoop:
 
 }
 
-func songQueue(ch <-chan string, cc chan<- string, inspector <-chan chan []string, shutdown <-chan chan []string) {
+func (m *mediaSession) stop() {
+	m.stream.Stop()
+	m.download.cancel()
+	m.encode.Cleanup()
+}
 
-	var songQueue []string
+func (m *mediaSession) pause() bool {
+	return m.stream.Pause()
+}
+
+func (m *mediaSession) resume() bool {
+	return m.stream.Resume()
+}
+
+func (d *downloadSession) cancel() {
+	d.Lock()
+	d.cncl()
+	d.Unlock()
+}
+
+func makePrettySongList(yts []*youtube.Video, currentSongPos time.Duration) string {
+	var sb strings.Builder
+	timeToNow := currentSongPos
+
+	for i, v := range yts {
+		fmt.Fprintf(&sb, "%d. %s | Playing in: %v\n", i+1, v.Title, timeToNow.Truncate(time.Second).String())
+		timeToNow = timeToNow + v.Duration
+	}
+	return sb.String()
+}
+
+func newSongQueue(songChannel <-chan songRequest) (chan *youtube.Video, chan chan []*youtube.Video, chan chan []*youtube.Video, chan bool) {
+	nextSong := make(chan *youtube.Video)
+	inspectSongQueue := make(chan chan []*youtube.Video)
+	queueShutDown := make(chan chan []*youtube.Video)
+	firstSongWait := make(chan bool)
+	go songQueue(songChannel, nextSong, inspectSongQueue, queueShutDown, firstSongWait)
+
+	return nextSong, inspectSongQueue, queueShutDown, firstSongWait
+}
+
+func songQueue(ch <-chan songRequest, cc chan<- *youtube.Video, inspector <-chan chan []*youtube.Video, shutdown <-chan chan []*youtube.Video, firstSongWait chan<- bool) {
+	client := youtube.Client{}
+	first := true
+	success := false
+
+	var songQueue []*youtube.Video
+	nullQ := make(chan<- *youtube.Video)
+	var songChannel *chan<- *youtube.Video
 	for {
+		var nextSong *youtube.Video
+		// This if statement nullifies the sending of songs to the player routine if there are no songs in the queue.
+		// It sets the channel to a channel which blocks forever, and the song to be sent is nil.
 		if len(songQueue) == 0 {
-			select {
-			case song := <-ch:
-				songQueue = append(songQueue, song)
-			case ret := <-inspector:
-				// This is slightly confusing. We do this rather than just sending directly on the channel so that we avoid data races and also only copy when required.
-				q := make([]string, len(songQueue))
-				copy(q, songQueue)
-				// This is a blocking send. The receiver must listen immediately or be put to death.
-				ret <- q
-			case sht := <-shutdown:
-				sht <- songQueue
-				return
-			}
+			songChannel = &nullQ
 		} else {
-			select {
-			case song := <-ch:
-				songQueue = append(songQueue, song)
-			case cc <- songQueue[0]:
-				songQueue = songQueue[1:]
-			case ret := <-inspector:
-				// This is slightly confusing. We do this rather than just sending directly on the channel so that we avoid data races and also only copy when required.
-				q := make([]string, len(songQueue))
-				copy(q, songQueue)
-				// This is a blocking send. The receiver must listen immediately or be put to death.
-				ret <- q
-			case sht := <-shutdown:
-				sht <- songQueue
-				return
+			nextSong = songQueue[0]
+			songChannel = &cc
+		}
+
+		select {
+		case song := <-ch:
+			func(url songRequest) {
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				vid, err := client.GetVideoContext(ctx, song.URL)
+				if err != nil {
+					go trySend(song.returnChan, "Song not found.", standardTimeout)
+					return
+				}
+				if vid.Duration <= time.Hour {
+					songQueue = append(songQueue, vid)
+					go trySend(song.returnChan, "Song added to queue.", standardTimeout)
+					success = true
+				} else {
+					go trySend(song.returnChan, "Song too long.", standardTimeout)
+				}
+			}(song)
+			if first {
+				first = !first
+				firstSongWait <- success
+				close(firstSongWait)
 			}
+		case *songChannel <- nextSong:
+			songQueue = songQueue[1:]
+		case ret := <-inspector:
+			// This is slightly confusing. We do this rather than just sending directly on the channel so that we avoid data races and also only copy when required.
+			q := make([]*youtube.Video, len(songQueue))
+			copy(q, songQueue)
+			// This is a blocking send. The receiver must listen immediately or be put to death.
+			ret <- q
+		case sht := <-shutdown:
+			sht <- songQueue
+			return
 		}
 	}
 

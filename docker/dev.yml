@@ -5,5 +5,3 @@ services:
             context: ..
             target: bin
         image: strife-app
-        volumes: 
-            - ~/.config/gcloud:/root/.config/gcloud
