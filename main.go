@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	os.Exit(strife.Run(os.Args[1:]))
+	os.Exit(strife.Run())
 }

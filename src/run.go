@@ -3,7 +3,6 @@ package strife
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -32,7 +31,7 @@ var bot strifeBot
 var ctx context.Context
 
 // Run starts strife
-func Run(args []string) int {
+func Run() int {
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
@@ -42,7 +41,7 @@ func Run(args []string) int {
 	ctx = context.Background()
 
 	// Create bot discord session and firestore client
-	err := bot.fromArgs(args)
+	err := bot.new()
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating bot from args.")
 		return 1
@@ -72,7 +71,15 @@ func Run(args []string) int {
 		log.Error().Err(err).Msg("")
 		return 1
 	}
-	defer bot.close()
+
+	// defer close
+	defer func(bot *strifeBot) {
+		err := bot.close()
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
+	}(&bot)
+
 	log.Info().Msg("Discord connection opened")
 
 	bot.mediaControllerChannel = createMainMediaController(bot.session)
@@ -86,14 +93,9 @@ func Run(args []string) int {
 	return 0
 }
 
-func (b *strifeBot) fromArgs(args []string) error {
+func (b *strifeBot) new() error {
 
-	fl := flag.NewFlagSet("strife", flag.ContinueOnError)
-
-	token := fl.String("t", "", "Discord Bot Token")
-	projectID := fl.String("p", "", "Firestore Project ID")
-
-	tod := struct {
+	credentials := struct {
 		Token string
 		ID    string
 	}{}
@@ -103,59 +105,43 @@ func (b *strifeBot) fromArgs(args []string) error {
 		return err
 	}
 
-	err = yaml.Unmarshal(dat, &tod)
+	err = yaml.Unmarshal(dat, &credentials)
 	if err != nil {
 		return err
 	}
 
-	if err := fl.Parse(args); err != nil {
-		return err
+	token := credentials.Token
+	if len(token) == 0 {
+		return errors.New("no Discord token provided")
 	}
 
-	if len(*token) == 0 {
-		tok := os.Getenv("DISCORD_TOKEN")
-		if tok == "" {
-			tok = tod.Token
-			if tok == "" {
-				return errors.New("No Discord token provided")
-			}
-		}
-		token = &tok
-	}
-
-	if len(*projectID) == 0 {
-		proji := os.Getenv("PROJECT_ID")
-		if proji == "" {
-			proji = tod.ID
-			if proji == "" {
-				return errors.New("No Project ID provided")
-			}
-		}
-		projectID = &proji
+	projectID := credentials.ID
+	if len(projectID) == 0 {
+		return errors.New("no Project ID provided")
 	}
 
 	log.Info().Msg("Creating Discord Session")
-	dg, err := discordgo.New("Bot " + *token)
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		return fmt.Errorf("Error creating discord session: %v", err)
+		return fmt.Errorf("error creating discord session: %v", err)
 	}
 	b.session = dg
 
 	log.Info().Msg("Creating Firestore Client")
-	client, err := firestore.NewClient(ctx, *projectID)
+	client, err := firestore.NewClient(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("Error creating Firestore Client: %v", err)
+		return fmt.Errorf("error creating Firestore Client: %v", err)
 	}
 	b.client = client
 
 	return nil
 }
 
-func (b *strifeBot) close() {
-	b.session.Close()
+func (b *strifeBot) close() error {
+	return b.session.Close()
 }
 
-func ready(s *discordgo.Session, event *discordgo.Ready) {
+func ready(s *discordgo.Session, _ *discordgo.Ready) {
 	err := s.UpdateStatus(0, "dev")
 	if err != nil {
 		log.Error().Err(err).Msg("")
