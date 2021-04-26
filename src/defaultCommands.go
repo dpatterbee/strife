@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/bwmarrin/discordgo"
 )
 
 type botCommand struct {
@@ -24,7 +24,7 @@ const (
 	botadmin
 )
 
-type defCommand func(*discordgo.Session, *discordgo.MessageCreate, string) (string, error)
+type defCommand func(*dgo.Session, *dgo.MessageCreate, string) (string, error)
 
 var something = []botCommand{
 	{
@@ -78,7 +78,7 @@ func makeDefaultCommands() map[string]botCommand {
 	return cmds
 }
 
-func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func playSound(sess *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 
 	resultChan := make(chan string)
 
@@ -90,12 +90,12 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 
 	s = strings.TrimSpace(s)
 	if len(s) > 0 {
-		req = mediaRequest{commandType: play, guildID: m.GuildID, commandData: s, returnChannel: resultChan, channelID: userVoiceChannel}
+		req = mediaRequest{commandType: play, guildID: m.GuildID, commandData: s, returnChan: resultChan, channelID: userVoiceChannel}
 	} else {
-		req = mediaRequest{commandType: resume, guildID: m.GuildID, commandData: s, returnChannel: resultChan, channelID: userVoiceChannel}
+		req = mediaRequest{commandType: resume, guildID: m.GuildID, commandData: s, returnChan: resultChan, channelID: userVoiceChannel}
 	}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 
 	select {
 	case bot.mediaControllerChannel <- req:
@@ -116,7 +116,7 @@ func playSound(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (s
 	}
 }
 
-func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 	guildID := m.GuildID
 
 	splitString := strings.SplitN(s, " ", 2)
@@ -138,7 +138,7 @@ func addCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (
 	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), err
 }
 
-func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 	guildID := m.GuildID
 
 	splitString := strings.SplitN(s, " ", 2)
@@ -160,7 +160,7 @@ func editCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) 
 
 }
 
-func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func removeCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 	guildID := m.GuildID
 
 	splitString := strings.SplitN(s, " ", 2)
@@ -187,13 +187,13 @@ func removeCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string
 
 }
 
-func commandsCommand(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func commandsCommand(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
 
 	return "This command will list commands when I can be bothered typing what they all do", nil
 
 }
 
-func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func prefix(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 
 	guildID := m.GuildID
 
@@ -213,11 +213,11 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 	return "Prefix successfully updated", err
 }
 
-func polo(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (string, error) {
+func polo(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
 	return "polo", nil
 }
 
-func listCustoms(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func listCustoms(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 
 	var som strings.Builder
 
@@ -237,7 +237,7 @@ func isDefaultCommand(s string) bool {
 	return ok
 }
 
-func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
+func userPermissionLevel(s *dgo.Session, m *dgo.MessageCreate) int {
 
 	b, _ := s.GuildMember(m.GuildID, m.Author.ID)
 
@@ -254,7 +254,7 @@ func userPermissionLevel(s *discordgo.Session, m *discordgo.MessageCreate) int {
 
 }
 
-func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func pauseSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 
 	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
 	if err != nil {
@@ -263,9 +263,9 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 
 	ch := make(chan string)
 
-	req := mediaRequest{commandType: pause, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+	req := mediaRequest{commandType: pause, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 
 	select {
 	case bot.mediaControllerChannel <- req:
@@ -285,7 +285,7 @@ func pauseSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (str
 
 }
 
-func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func resumeSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 
 	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
 	if err != nil {
@@ -294,9 +294,9 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 
 	ch := make(chan string)
 
-	req := mediaRequest{commandType: resume, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+	req := mediaRequest{commandType: resume, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 
 	select {
 	case bot.mediaControllerChannel <- req:
@@ -315,7 +315,7 @@ func resumeSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 	}
 }
 
-func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func skipSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 
 	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
 	if err != nil {
@@ -324,9 +324,9 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 
 	ch := make(chan string)
 
-	req := mediaRequest{commandType: skip, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+	req := mediaRequest{commandType: skip, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 
 	select {
 	case bot.mediaControllerChannel <- req:
@@ -346,7 +346,7 @@ func skipSound(s *discordgo.Session, m *discordgo.MessageCreate, c string) (stri
 
 }
 
-func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func disconnectVoice(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 
 	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
 	if err != nil {
@@ -355,9 +355,9 @@ func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string)
 
 	ch := make(chan string)
 
-	req := mediaRequest{commandType: disconnect, guildID: m.GuildID, channelID: userVoiceChannel, returnChannel: ch}
+	req := mediaRequest{commandType: disconnect, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 
 	select {
 	case bot.mediaControllerChannel <- req:
@@ -377,12 +377,12 @@ func disconnectVoice(s *discordgo.Session, m *discordgo.MessageCreate, c string)
 
 }
 
-func inspectQueue(s *discordgo.Session, m *discordgo.MessageCreate, c string) (string, error) {
+func inspectQueue(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
 	ch := make(chan string)
 
-	req := mediaRequest{commandType: inspect, guildID: m.GuildID, channelID: "", returnChannel: ch}
+	req := mediaRequest{commandType: inspect, guildID: m.GuildID, channelID: "", returnChan: ch}
 
-	timeout := time.NewTimer(standardTimeout)
+	timeout := time.NewTimer(stdTimeout)
 	select {
 	case bot.mediaControllerChannel <- req:
 		timeout.Stop()

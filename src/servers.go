@@ -3,7 +3,7 @@ package strife
 import (
 	"context"
 
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/api/iterator"
 )
@@ -24,7 +24,7 @@ type server struct {
 	ID       string
 }
 
-func buildServerData(ctx context.Context, s *discordgo.Session) (map[string]*server, error) {
+func buildServerData(ctx context.Context, s *dgo.Session) (map[string]*server, error) {
 
 	// log := log.With().Caller().Logger()
 

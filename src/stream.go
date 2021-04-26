@@ -4,12 +4,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
 )
 
 type streamSession struct {
-	vc *discordgo.VoiceConnection
+	vc *dgo.VoiceConnection
 
 	stop chan bool
 	done chan error
@@ -22,7 +22,7 @@ type streamSession struct {
 	sync.RWMutex
 }
 
-func newStreamingSession(source dca.OpusReader, vc *discordgo.VoiceConnection) *streamSession {
+func newStreamingSession(source dca.OpusReader, vc *dgo.VoiceConnection) *streamSession {
 
 	session := &streamSession{
 		vc:     vc,
@@ -100,6 +100,7 @@ func (s *streamSession) Streaming() bool {
 	return s.streaming
 }
 
+// Pause pauses the current streamSession.
 // Due to the nature of the streamSession, the only difference between pausing and
 // stopping a stream is that stopping is typically followed by the discarding of the
 // streamSession itself. Hence Pause is simply an alias of Stop.

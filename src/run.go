@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
@@ -22,10 +22,10 @@ type strifeBot struct {
 	defaultCommands        map[string]botCommand
 	mediaControllerChannel chan mediaRequest
 	client                 *firestore.Client
-	session                *discordgo.Session
+	session                *dgo.Session
 }
 
-const standardTimeout = time.Millisecond * 500
+const stdTimeout = time.Millisecond * 500
 
 var bot strifeBot
 var ctx context.Context
@@ -55,7 +55,8 @@ func Run() int {
 	}
 	bot.defaultCommands = makeDefaultCommands()
 
-	// Add event handlers to discordgo session https://discord.com/developers/docs/topics/gateway#commands-and-events-gateway-events
+	// Add event handlers to discordgo session
+	// https://discord.com/developers/docs/topics/gateway#commands-and-events-gateway-events
 	log.Info().Msg("Adding event handlers to discordgo session")
 	bot.session.AddHandler(ready)
 	bot.session.AddHandler(messageCreate)
@@ -121,7 +122,7 @@ func (b *strifeBot) new() error {
 	}
 
 	log.Info().Msg("Creating Discord Session")
-	dg, err := discordgo.New("Bot " + token)
+	dg, err := dgo.New("Bot " + token)
 	if err != nil {
 		return fmt.Errorf("error creating discord session: %v", err)
 	}
@@ -141,14 +142,14 @@ func (b *strifeBot) close() error {
 	return b.session.Close()
 }
 
-func ready(s *discordgo.Session, _ *discordgo.Ready) {
+func ready(s *dgo.Session, _ *dgo.Ready) {
 	err := s.UpdateStatus(0, "dev")
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
 }
 
-func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
+func guildRoleCreate(s *dgo.Session, r *dgo.GuildRoleCreate) {
 	guildID := r.GuildID
 	bot.servers[guildID].Roles = getServerRoles(s, guildID)
 
@@ -163,7 +164,7 @@ func guildRoleCreate(s *discordgo.Session, r *discordgo.GuildRoleCreate) {
 
 }
 
-func guildRoleUpdate(s *discordgo.Session, r *discordgo.GuildRoleUpdate) {
+func guildRoleUpdate(s *dgo.Session, r *dgo.GuildRoleUpdate) {
 	guildID := r.GuildID
 	bot.servers[guildID].Roles = getServerRoles(s, guildID)
 
@@ -177,7 +178,7 @@ func guildRoleUpdate(s *discordgo.Session, r *discordgo.GuildRoleUpdate) {
 	}
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 
 	if m.Author.ID == s.State.User.ID {
 		return
@@ -239,7 +240,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 }
 
-func getServerRoles(s *discordgo.Session, i string) map[string]int64 {
+func getServerRoles(s *dgo.Session, i string) map[string]int64 {
 	e, _ := s.GuildRoles(i)
 
 	m := make(map[string]int64)
@@ -275,7 +276,7 @@ func trySend(channel chan string, data string, timeoutDuration time.Duration) {
 	}
 }
 
-func createMainMediaController(sess *discordgo.Session) chan mediaRequest {
+func createMainMediaController(sess *dgo.Session) chan mediaRequest {
 	ch := make(chan mediaRequest)
 
 	go mediaControlRouter(sess, ch)
