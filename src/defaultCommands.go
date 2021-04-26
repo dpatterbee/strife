@@ -197,7 +197,7 @@ func prefix(sess *discordgo.Session, m *discordgo.MessageCreate, s string) (stri
 
 	guildID := m.GuildID
 
-	//Do some check for bad characters
+	// Do some check for bad characters
 	if len(strings.Split(s, " ")) > 1 {
 		return "Prefix must be a single word", nil
 	}
@@ -226,7 +226,7 @@ func listCustoms(s *discordgo.Session, m *discordgo.MessageCreate, c string) (st
 	}
 
 	for i, v := range bot.servers[m.GuildID].Commands {
-		fmt.Fprintf(&som, "Command: %v | Text: %v\n", i, v)
+		_, _ = fmt.Fprintf(&som, "Command: %v | Text: %v\n", i, v)
 	}
 
 	return som.String(), nil

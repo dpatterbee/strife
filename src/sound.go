@@ -2,11 +2,9 @@ package strife
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	lg "log"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +55,7 @@ type mediaCommand struct {
 }
 
 type downloadSession struct {
-	cncl context.CancelFunc
+	cancel context.CancelFunc
 	sync.Mutex
 }
 
@@ -201,7 +199,7 @@ func passCommandThroughToGuildSoundPlayerWithTimeout(controlChan chan mediaComma
 		timer.Stop()
 		return
 	case <-timer.C:
-		go trySend(elem.returnChannel, "Serber bisi", standardTimeout)
+		go trySend(elem.returnChannel, "Server busy", standardTimeout)
 		return
 	}
 }
@@ -236,15 +234,21 @@ func streamSong(writePipe io.WriteCloser, video *youtube.Video, d *downloadSessi
 	if err != nil {
 		log.Error().Err(err).Msg("")
 		cancel()
-		writePipe.Close()
+		err := writePipe.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
 		return
 	}
-	defer resp.Body.Close()
-	d.cncl = cancel
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
+	}(resp.Body)
+	d.cancel = cancel
 	d.Unlock()
-	if err != nil {
-		log.Info().Msg(err.Error())
-	}
+
 	_, err = io.Copy(writePipe, resp.Body)
 
 	if err != nil {
@@ -257,7 +261,10 @@ func streamSong(writePipe io.WriteCloser, video *youtube.Video, d *downloadSessi
 	} else {
 		log.Info().Msg("Finished download.")
 	}
-	writePipe.Close()
+	err = writePipe.Close()
+	if err != nil {
+		log.Error().Err(err).Msg("")
+	}
 }
 
 func newSongSession(s *youtube.Video) (*dca.EncodeSession, *downloadSession, error) {
@@ -320,7 +327,7 @@ func getUserVoiceChannel(sess *discordgo.Session, userID, guildID string) (strin
 		}
 	}
 
-	return "", fmt.Errorf("User not in voice channel")
+	return "", fmt.Errorf("error: user not in voice channel")
 
 }
 
@@ -334,7 +341,7 @@ func guildSoundPlayer(
 	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
 	previousInstanceWaitChan <-chan bool,
 ) {
-	log.Info().Msg("Soundhandler not active, activating")
+	log.Info().Msg("Sound handler not active, activating")
 
 	if previousInstanceWaitChan != nil {
 		<-previousInstanceWaitChan
@@ -389,7 +396,10 @@ mainLoop:
 				return
 			}
 
-			vc.Speaking(true)
+			err = vc.Speaking(true)
+			if err != nil {
+				log.Error().Err(err).Msg("")
+			}
 
 			log.Info().
 				Str("guildID", guildID).
@@ -404,7 +414,9 @@ mainLoop:
 				select {
 
 				case err := <-mediaSession.stream.done:
-					vc.Speaking(false)
+					if err := vc.Speaking(false); err != nil {
+						log.Error().Err(err).Msg("")
+					}
 					mediaSession.stop() // Ensure the song cleans up okay.
 					if err == io.EOF {
 						log.Info().Msg("Song Completed.")
@@ -480,14 +492,17 @@ mainLoop:
 	remainingQ := make(chan []*youtube.Video)
 	queueShutDown <- remainingQ
 	<-remainingQ
-	vc.Disconnect()
+	err = vc.Disconnect()
+	if err != nil {
+		log.Error().Err(err).Msg("")
+	}
 	mediaReturnFinishChan <- guildID
 
 }
 
 func (m *mediaSession) stop() {
 	m.stream.Stop()
-	m.download.cancel()
+	m.download.safeCancel()
 	m.encode.Cleanup()
 }
 
@@ -499,9 +514,9 @@ func (m *mediaSession) resume() bool {
 	return m.stream.Resume()
 }
 
-func (d *downloadSession) cancel() {
+func (d *downloadSession) safeCancel() {
 	d.Lock()
-	d.cncl()
+	d.cancel()
 	d.Unlock()
 }
 
