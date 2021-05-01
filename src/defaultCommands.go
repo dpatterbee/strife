@@ -14,6 +14,7 @@ type botCommand struct {
 	command    string
 	function   defCommand
 	permission int
+	aliases    []string
 }
 
 const (

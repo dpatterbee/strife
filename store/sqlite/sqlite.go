@@ -75,3 +75,11 @@ func (d db) AddCommand(guildID, commandName, commandText string) error {
 
 	return err
 }
+
+func (d db) AddRole(guildID string, botRole int64, roleID string) error {
+	return nil
+}
+
+func (d db) GetRole(guildID string, botRole int64) (string, error) {
+	return "", nil
+}

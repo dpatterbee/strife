@@ -10,19 +10,19 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	dgo "github.com/bwmarrin/discordgo"
+	"github.com/dpatterbee/strife/store"
+	"github.com/dpatterbee/strife/store/sqlite"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
 
 type strifeBot struct {
-	servers                map[string]*server
 	defaultCommands        map[string]botCommand
 	mediaControllerChannel chan mediaRequest
-	client                 *firestore.Client
 	session                *dgo.Session
+	store                  store.Store
 }
 
 const stdTimeout = time.Millisecond * 500
@@ -40,7 +40,7 @@ func Run() int {
 
 	ctx = context.Background()
 
-	// Create bot discord session and firestore client
+	// Create bot discord session and database store
 	err := bot.new()
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating bot from args.")
@@ -48,11 +48,6 @@ func Run() int {
 	}
 
 	// Build commands and server map
-	bot.servers, err = buildServerData(ctx, bot.session)
-	if err != nil {
-		log.Error().Err(err).Msg("Error building Server Data")
-		return 1
-	}
 	bot.defaultCommands = makeDefaultCommands()
 
 	// Add event handlers to discordgo session
@@ -98,7 +93,6 @@ func (b *strifeBot) new() error {
 
 	credentials := struct {
 		Token string
-		ID    string
 	}{}
 
 	dat, err := os.ReadFile("./creds.yml")
@@ -116,11 +110,6 @@ func (b *strifeBot) new() error {
 		return errors.New("no Discord token provided")
 	}
 
-	projectID := credentials.ID
-	if len(projectID) == 0 {
-		return errors.New("no Project ID provided")
-	}
-
 	log.Info().Msg("Creating Discord Session")
 	dg, err := dgo.New("Bot " + token)
 	if err != nil {
@@ -128,12 +117,8 @@ func (b *strifeBot) new() error {
 	}
 	b.session = dg
 
-	log.Info().Msg("Creating Firestore Client")
-	client, err := firestore.NewClient(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("error creating Firestore Client: %v", err)
-	}
-	b.client = client
+	log.Info().Msg("Getting database")
+	b.store = sqlite.New()
 
 	return nil
 }
@@ -217,31 +202,40 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 			response = err.Error()
 		}
 	} else {
-		response = currentServer.Commands[splitContent[0]]
+		var err error
+		response, err = bot.store.GetCommand(m.GuildID, splitContent[0])
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
 	}
 
-	if response != "" {
-		response = "**" + response + "**"
-		message, err := s.ChannelMessageSend(m.ChannelID, response)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("msg", message.ContentWithMentionsReplaced()).
-				Str("author", message.Author.String()).
-				Str("channelID", message.ChannelID).
-				Msg("")
-		}
-		log.Info().
+	if response == "" {
+		response = "Command not found"
+	}
+
+	response = "**" + response + "**"
+	message, err := s.ChannelMessageSend(m.ChannelID, response)
+	if err != nil {
+		log.Error().
+			Err(err).
 			Str("msg", message.ContentWithMentionsReplaced()).
 			Str("author", message.Author.String()).
 			Str("channelID", message.ChannelID).
 			Msg("")
 	}
+	log.Info().
+		Str("msg", message.ContentWithMentionsReplaced()).
+		Str("author", message.Author.String()).
+		Str("channelID", message.ChannelID).
+		Msg("")
 
 }
 
-func getServerRoles(s *dgo.Session, i string) map[string]int64 {
-	e, _ := s.GuildRoles(i)
+func getServerRoles(s *dgo.Session, i string) (map[string]int64, error) {
+	e, err := s.GuildRoles(i)
+	if err != nil {
+		return nil, err
+	}
 
 	m := make(map[string]int64)
 
@@ -260,7 +254,7 @@ func getServerRoles(s *dgo.Session, i string) map[string]int64 {
 		}
 	}
 
-	return m
+	return m, nil
 }
 
 // trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
