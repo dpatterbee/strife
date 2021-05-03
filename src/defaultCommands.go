@@ -1,12 +1,12 @@
 package strife
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	dgo "github.com/bwmarrin/discordgo"
 )
 
@@ -24,6 +24,31 @@ const (
 	botmoderator
 	botadmin
 )
+
+var roles = []string{
+	"botunknown",
+	"botuser",
+	"botdj",
+	"botmoderator",
+	"botadmin",
+}
+
+func roleToNum(s string) (int64, error) {
+	for i, v := range roles {
+		if v == s {
+			return int64(i), nil
+		}
+	}
+	return 0, errors.New("role not found")
+
+}
+
+func numToRole(i int64) (string, error) {
+	if int(i) >= len(roles) {
+		return "", errors.New("no such role")
+	}
+	return roles[int(i)], nil
+}
 
 type defCommand func(*dgo.Session, *dgo.MessageCreate, string) (string, error)
 
@@ -127,16 +152,19 @@ func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) 
 	}
 
 	command := splitString[0]
-	_, ok := bot.servers[guildID].Commands[command]
-	if ok {
+	_, err := bot.store.GetCommand(guildID, command)
+	if err == nil {
 		return fmt.Sprintf("Command \"%v\" already exists!", command), nil
+	} else if err != sql.ErrNoRows {
+		return "", err
 	}
 
-	bot.servers[guildID].Commands[command] = splitString[1]
-	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
-		"commands": map[string]string{command: splitString[1]},
-	}, firestore.MergeAll)
-	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), err
+	err = bot.store.AddOrUpdateCommand(guildID, command, splitString[1])
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), nil
 }
 
 func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
@@ -145,19 +173,22 @@ func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error)
 	splitString := strings.SplitN(s, " ", 2)
 
 	if len(splitString) < 2 {
-		return "syntax problem", nil
+		return "Incorrect Syntax", nil
 	}
 	command := splitString[0]
-	_, ok := bot.servers[guildID].Commands[command]
-	if !ok {
-		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
+
+	_, err := bot.store.GetCommand(guildID, command)
+	if err == sql.ErrNoRows {
+		return fmt.Sprintf("Command \"%v\" does not exist!", command), nil
+	} else if err != nil {
+		return "", nil
 	}
 
-	bot.servers[guildID].Commands[command] = splitString[1]
-	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{
-		"commands": map[string]string{command: splitString[1]},
-	}, firestore.MergeAll)
-	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), err
+	err = bot.store.AddOrUpdateCommand(guildID, command, splitString[1])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), nil
 
 }
 
@@ -171,20 +202,19 @@ func removeCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, erro
 	}
 
 	command := splitString[0]
-	_, ok := bot.servers[guildID].Commands[command]
-	if !ok {
+	_, err := bot.store.GetCommand(guildID, command)
+	if err == sql.ErrNoRows {
 		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
+	} else if err != nil {
+		return "", err
 	}
 
-	delete(bot.servers[guildID].Commands, command)
-	_, err := bot.client.Collection("servers").Doc(guildID).Update(ctx, []firestore.Update{
-		{
-			Path:  "commands." + command,
-			Value: firestore.Delete,
-		},
-	})
+	err = bot.store.DeleteCommand(guildID, command)
+	if err != nil {
+		return "", err
+	}
 
-	return fmt.Sprintf("Command \"%v\" successfully removed!", command), err
+	return fmt.Sprintf("Command \"%v\" successfully removed!", command), nil
 
 }
 
@@ -207,11 +237,12 @@ func prefix(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 		return "Prefix must be 10 or fewer characters", nil
 	}
 
-	bot.servers[guildID].Prefix = s
+	err := bot.store.SetPrefix(guildID, s)
+	if err != nil {
+		return "", err
+	}
 
-	_, err := bot.client.Collection("servers").Doc(guildID).Set(ctx, map[string]interface{}{"prefix": s}, firestore.MergeAll)
-
-	return "Prefix successfully updated", err
+	return "Prefix successfully updated", nil
 }
 
 func polo(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
@@ -222,12 +253,16 @@ func listCustoms(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error)
 
 	var som strings.Builder
 
-	if len(bot.servers[m.GuildID].Commands) == 0 {
-		return "", errors.New("server has no custom commands")
+	cmds, err := bot.store.GetAllCommands(m.GuildID)
+	if err != nil {
+		return "", err
+	}
+	if len(cmds) == 0 {
+		return "Server has no custom commands", nil
 	}
 
-	for i, v := range bot.servers[m.GuildID].Commands {
-		_, _ = fmt.Fprintf(&som, "Command: %v | Text: %v\n", i, v)
+	for _, v := range cmds {
+		_, _ = fmt.Fprintf(&som, "Command: %v | Text: %v\n", v[0], v[1])
 	}
 
 	return som.String(), nil
@@ -243,10 +278,14 @@ func userPermissionLevel(s *dgo.Session, m *dgo.MessageCreate) int {
 	b, _ := s.GuildMember(m.GuildID, m.Author.ID)
 
 	highestPermission := botuser
+	roles, err := bot.store.GetRoles(m.GuildID)
+	if err != nil {
+		return botuser
+	}
 	for _, v := range b.Roles {
-		if val, ok := bot.servers[m.GuildID].Roles[v]; ok {
-			if int(val) > highestPermission {
-				highestPermission = int(val)
+		for i, w := range roles {
+			if v == w {
+				highestPermission = i
 			}
 		}
 	}

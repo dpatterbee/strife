@@ -2,6 +2,7 @@ package strife
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
-	"github.com/dpatterbee/strife/store"
-	"github.com/dpatterbee/strife/store/sqlite"
+	"github.com/dpatterbee/strife/src/store"
+	"github.com/dpatterbee/strife/src/store/sqlite"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
@@ -58,7 +59,8 @@ func Run() int {
 	bot.session.AddHandler(guildRoleCreate)
 	bot.session.AddHandler(guildRoleUpdate)
 
-	bot.session.Identify.Intents = nil
+	bot.session.Identify.Intents = dgo.IntentsGuilds | dgo.IntentsGuildMessages |
+		dgo.IntentsGuildVoiceStates
 
 	// Open Discord connection
 	log.Info().Msg("Opening discord connection")
@@ -127,37 +129,61 @@ func (b *strifeBot) close() error {
 	return b.session.Close()
 }
 
-func ready(s *dgo.Session, _ *dgo.Ready) {
-	err := s.UpdateStatus(0, "dev")
+func ready(s *dgo.Session, r *dgo.Ready) {
+
+	guilds := r.Guilds
+	for _, v := range guilds {
+		_, err := bot.store.GetPrefix(v.ID)
+		if err == sql.ErrNoRows {
+			err := bot.store.SetPrefix(v.ID, "!")
+			if err != nil {
+				log.Error().Err(err).Msg("")
+			}
+		} else if err != nil {
+			log.Error().Err(err).Msg("")
+		}
+
+		rs, err := s.GuildRoles(v.ID)
+		for _, w := range rs {
+			if in(w.Name, roles) {
+				err = bot.store.AddRole(v.ID, w.Name, w.ID)
+				if err != nil {
+					log.Error().Err(err).Msg("")
+				}
+			}
+		}
+	}
+
+	err := s.UpdateGameStatus(0, "dev")
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
 }
 
-func guildRoleCreate(s *dgo.Session, r *dgo.GuildRoleCreate) {
-	guildID := r.GuildID
-	bot.servers[guildID].Roles = getServerRoles(s, guildID)
-
-	data := map[string]interface{}{
-		"roles": bot.servers[guildID].Roles,
+func in(s string, ss []string) bool {
+	for _, v := range ss {
+		if s == v {
+			return true
+		}
 	}
+	return false
+}
 
-	_, err := updateServers(guildID, data)
+func guildRoleCreate(_ *dgo.Session, r *dgo.GuildRoleCreate) {
+	if !in(r.Role.Name, roles) {
+		return
+	}
+	err := bot.store.AddRole(r.GuildID, r.Role.Name, r.Role.ID)
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
-
 }
 
-func guildRoleUpdate(s *dgo.Session, r *dgo.GuildRoleUpdate) {
-	guildID := r.GuildID
-	bot.servers[guildID].Roles = getServerRoles(s, guildID)
-
-	data := map[string]interface{}{
-		"roles": bot.servers[guildID].Roles,
+func guildRoleUpdate(_ *dgo.Session, r *dgo.GuildRoleUpdate) {
+	if !in(r.Role.Name, roles) {
+		return
 	}
-
-	_, err := updateServers(guildID, data)
+	err := bot.store.AddRole(r.GuildID, r.Role.Name, r.Role.ID)
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
@@ -169,12 +195,15 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		return
 	}
 
-	currentServer := bot.servers[m.GuildID]
-
-	if !strings.HasPrefix(m.Content, currentServer.Prefix) {
+	prefix, err := bot.store.GetPrefix(m.GuildID)
+	if err != nil {
 		return
 	}
-	content := strings.TrimPrefix(m.Content, currentServer.Prefix)
+
+	if !strings.HasPrefix(m.Content, prefix) {
+		return
+	}
+	content := strings.TrimPrefix(m.Content, prefix)
 
 	splitContent := strings.Split(content, " ")
 	if len(splitContent) == 1 {
@@ -229,32 +258,6 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		Str("channelID", message.ChannelID).
 		Msg("")
 
-}
-
-func getServerRoles(s *dgo.Session, i string) (map[string]int64, error) {
-	e, err := s.GuildRoles(i)
-	if err != nil {
-		return nil, err
-	}
-
-	m := make(map[string]int64)
-
-	for _, v := range e {
-		if v.Name == "botuser" {
-			m[v.ID] = botuser
-		}
-		if v.Name == "botdj" {
-			m[v.ID] = botdj
-		}
-		if v.Name == "botmoderator" {
-			m[v.ID] = botmoderator
-		}
-		if v.Name == "botadmin" {
-			m[v.ID] = botadmin
-		}
-	}
-
-	return m, nil
 }
 
 // trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
