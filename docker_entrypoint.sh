@@ -4,6 +4,6 @@ cd /
 
 litestream restore -if-replica-exists "$DB_PATH"
 
-litestream replicate &
+litestream replicate > litelog 2>&1 &
 
-eval "/app/strife"
+/app/strife > strifelog

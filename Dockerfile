@@ -15,7 +15,6 @@ RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz
 FROM alpine AS bin
 RUN apk add ffmpeg
 ENV DB_PATH=data/store.db
-COPY creds.yml .
 COPY litestream.yml /etc/litestream.yml
 COPY docker_entrypoint.sh /app/
 COPY --from=build /out/strife /app/

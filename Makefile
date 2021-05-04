@@ -8,4 +8,5 @@ run:
   		-e "LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY}" \
   		-e "DB_REPLICA_URL=${DB_REPLICA_URL}" \
   		-e "DB_PATH"=/data/store.db \
-		-it strife /bin/sh
+  		-e "TOKEN"=${TOKEN} \
+		-dit strife

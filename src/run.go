@@ -1,7 +1,6 @@
 package strife
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"github.com/dpatterbee/strife/src/store/sqlite"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v2"
 )
 
 type strifeBot struct {
@@ -29,7 +27,6 @@ type strifeBot struct {
 const stdTimeout = time.Millisecond * 500
 
 var bot strifeBot
-var ctx context.Context
 
 // Run starts strife
 func Run() int {
@@ -38,8 +35,6 @@ func Run() int {
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	log.Logger = log.With().Caller().Logger()
-
-	ctx = context.Background()
 
 	// Create bot discord session and database store
 	err := bot.new()
@@ -93,21 +88,7 @@ func Run() int {
 
 func (b *strifeBot) new() error {
 
-	credentials := struct {
-		Token string
-	}{}
-
-	dat, err := os.ReadFile("./creds.yml")
-	if err != nil {
-		return err
-	}
-
-	err = yaml.Unmarshal(dat, &credentials)
-	if err != nil {
-		return err
-	}
-
-	token := credentials.Token
+	token := os.Getenv("TOKEN")
 	if len(token) == 0 {
 		return errors.New("no Discord token provided")
 	}
