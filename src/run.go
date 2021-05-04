@@ -238,10 +238,6 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		}
 	}
 
-	if response == "" {
-		response = "Command not found"
-	}
-
 	response = "**" + response + "**"
 	message, err := s.ChannelMessageSend(m.ChannelID, response)
 	if err != nil {

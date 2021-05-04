@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/dpatterbee/strife/src/store"
@@ -18,7 +19,11 @@ type db struct {
 }
 
 func New() store.Store {
-	dbDir := "data"
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		log.Fatal().Msg("No database directory environment variable")
+	}
+	dbDir := filepath.Dir(dbPath)
 	if _, err := os.Stat(dbDir); os.IsNotExist(err) {
 		err := os.Mkdir(dbDir, os.ModePerm)
 		if err != nil {
@@ -26,7 +31,7 @@ func New() store.Store {
 		}
 	}
 
-	ctx, err := sql.Open("sqlite3", dbDir+"/store.db")
+	ctx, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("")
 	}
