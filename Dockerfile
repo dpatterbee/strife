@@ -13,8 +13,18 @@ ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.4/litestrea
 RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz
 
 FROM alpine AS bin
+
+ARG LITESTREAM_ACCESS_KEY_ID
+ARG LITESTREAM_SECRET_ACCESS_KEY
+ARG DB_REPLICA_URL
+ARG TOKEN
+
 RUN apk add ffmpeg
 ENV DB_PATH=data/store.db
+ENV LITESTREAM_ACCESS_KEY_ID=${LITESTREAM_ACCESS_KEY_ID}
+ENV LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY}
+ENV DB_REPLICA_URL=${DB_REPLICA_URL}
+ENV TOKEN=${TOKEN}
 COPY litestream.yml /etc/litestream.yml
 COPY docker_entrypoint.sh /app/
 COPY --from=build /out/strife /app/

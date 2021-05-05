@@ -33,7 +33,7 @@ func Run() int {
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true})
 	log.Logger = log.With().Caller().Logger()
 
 	// Create bot discord session and database store
