@@ -18,6 +18,7 @@ type db struct {
 	sync.RWMutex
 }
 
+// New returns a new sqlite db object
 func New() store.Store {
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
@@ -73,6 +74,7 @@ func New() store.Store {
 
 }
 
+// AddOrUpdateCommand inserts or replaces a command in the database
 func (d *db) AddOrUpdateCommand(guildID, commandName, commandText string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -84,6 +86,7 @@ func (d *db) AddOrUpdateCommand(guildID, commandName, commandText string) error 
 	return err
 }
 
+// GetCommand gets the specified command from the database or returns an error
 func (d *db) GetCommand(guildID, commandName string) (string, error) {
 	d.RLock()
 	defer d.RUnlock()
@@ -108,6 +111,7 @@ func (d *db) GetCommand(guildID, commandName string) (string, error) {
 
 }
 
+// GetAllCommands returns all commands and their bodies from the db
 func (d *db) GetAllCommands(guildID string) ([][2]string, error) {
 	d.RLock()
 	defer d.RUnlock()
@@ -152,6 +156,7 @@ func (d *db) GetAllCommands(guildID string) ([][2]string, error) {
 
 }
 
+// DeleteCommand removes the specified command from the database, error if nonexistent
 func (d *db) DeleteCommand(guildID, commandName string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -164,6 +169,7 @@ func (d *db) serverCreate(guildID string) {
 	_, _ = d.ctx.Exec("INSERT OR ABORT INTO servers (guildID) VALUES (?)", guildID)
 }
 
+// AddRole adds a role to the database
 func (d *db) AddRole(guildID, botRole, roleID string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -175,6 +181,7 @@ func (d *db) AddRole(guildID, botRole, roleID string) error {
 	return err
 }
 
+// GetRoles gets the IDs for all roles in the specified guild
 func (d *db) GetRoles(guildID string) ([]string, error) {
 	d.RLock()
 	defer d.RUnlock()
@@ -201,6 +208,7 @@ func (d *db) GetRoles(guildID string) ([]string, error) {
 	return contents, nil
 }
 
+// SetPrefix sets the prefix of the specified guild
 func (d *db) SetPrefix(guildID, prefix string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -212,6 +220,7 @@ func (d *db) SetPrefix(guildID, prefix string) error {
 	return err
 }
 
+// GetPrefix gets the prefix of the specified guild
 func (d *db) GetPrefix(guildID string) (string, error) {
 	d.RLock()
 	defer d.RUnlock()
@@ -231,6 +240,7 @@ func (d *db) GetPrefix(guildID string) (string, error) {
 
 }
 
+// SetName stores the name of the server
 func (d *db) SetName(guildID, name string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -240,6 +250,7 @@ func (d *db) SetName(guildID, name string) error {
 	return err
 }
 
+// GetName gets the name of the specified guild
 func (d *db) GetName(guildID string) (string, error) {
 	d.RLock()
 	defer d.RUnlock()

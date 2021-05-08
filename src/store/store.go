@@ -1,5 +1,6 @@
 package store
 
+// Store represents a server database
 type Store interface {
 	AddOrUpdateCommand(guildID, commandName, commandText string) error
 	GetCommand(guildID, commandName string) (string, error)

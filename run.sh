@@ -11,7 +11,7 @@ error() {
 }
 
 if [ -f striferc ]; then
-  . striferc
+  . "$(pwd)/striferc"
   run
 fi
 if [ -f /root/striferc ]; then

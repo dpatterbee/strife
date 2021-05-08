@@ -2,7 +2,6 @@ package strife
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,23 +30,6 @@ var roles = []string{
 	"botdj",
 	"botmoderator",
 	"botadmin",
-}
-
-func roleToNum(s string) (int64, error) {
-	for i, v := range roles {
-		if v == s {
-			return int64(i), nil
-		}
-	}
-	return 0, errors.New("role not found")
-
-}
-
-func numToRole(i int64) (string, error) {
-	if int(i) >= len(roles) {
-		return "", errors.New("no such role")
-	}
-	return roles[int(i)], nil
 }
 
 type defCommand func(*dgo.Session, *dgo.MessageCreate, string) (string, error)
