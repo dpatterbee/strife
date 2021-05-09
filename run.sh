@@ -14,6 +14,10 @@ if [ -f striferc ]; then
   . "$(pwd)/striferc"
   run
 fi
+if [ -f build/striferc ]; then
+  . "$(pwd)/build/striferc"
+  build
+fi
 if [ -f /root/striferc ]; then
   . /root/striferc
   run

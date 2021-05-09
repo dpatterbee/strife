@@ -26,8 +26,8 @@ ENV LITESTREAM_ACCESS_KEY_ID=${LITESTREAM_ACCESS_KEY_ID}
 ENV LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY}
 ENV DB_REPLICA_URL=${DB_REPLICA_URL}
 ENV TOKEN=${TOKEN}
-COPY litestream.yml /etc/litestream.yml
-COPY docker_entrypoint.sh /app/
+COPY build/litestream.yml /etc/litestream.yml
+COPY build/docker_entrypoint.sh /app/
 COPY restart_bot.sh /app/
 COPY --from=build /out/strife /app/
 COPY --from=build /usr/local/bin/litestream /usr/local/bin/litestream
