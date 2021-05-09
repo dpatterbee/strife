@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
+	"github.com/dpatterbee/strife/src/media"
 )
 
 type botCommand struct {
@@ -87,44 +87,6 @@ func makeDefaultCommands() map[string]botCommand {
 	}
 
 	return cmds
-}
-
-func playSound(sess *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
-
-	resultChan := make(chan string)
-
-	userVoiceChannel, err := getUserVoiceChannel(sess, m.Author.ID, m.GuildID)
-	if err != nil {
-		return "You need to be in a voice channel to use this command.", nil
-	}
-	var req mediaRequest
-
-	s = strings.TrimSpace(s)
-	if len(s) > 0 {
-		req = mediaRequest{commandType: play, guildID: m.GuildID, commandData: s, returnChan: resultChan, channelID: userVoiceChannel}
-	} else {
-		req = mediaRequest{commandType: resume, guildID: m.GuildID, commandData: s, returnChan: resultChan, channelID: userVoiceChannel}
-	}
-
-	timeout := time.NewTimer(stdTimeout)
-
-	select {
-	case bot.mediaControllerChannel <- req:
-		// Not sure if this is actually required
-		if !timeout.Stop() {
-			<-timeout.C
-		}
-	case <-timeout.C:
-		return "Server busy, please try again", nil
-	}
-
-	timeout.Reset(10 * time.Second)
-	select {
-	case result := <-resultChan:
-		return result, nil
-	case <-timeout.C:
-		return "", nil
-	}
 }
 
 func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
@@ -279,149 +241,55 @@ func userPermissionLevel(s *dgo.Session, m *dgo.MessageCreate) int {
 
 }
 
-func pauseSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func getUserVoiceChannel(userID, guildID string) (string, error) {
 
-	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	guild, err := bot.session.State.Guild(guildID)
 	if err != nil {
-		return "You must be in a voice channel to pause the song", nil
+		return "", err
 	}
 
-	ch := make(chan string)
-
-	req := mediaRequest{commandType: pause, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
-
-	timeout := time.NewTimer(stdTimeout)
-
-	select {
-	case bot.mediaControllerChannel <- req:
-		timeout.Stop()
-	case <-timeout.C:
-		return "Servers busy !", nil
+	for _, v := range guild.VoiceStates {
+		if v.UserID == userID {
+			return v.ChannelID, nil
+		}
 	}
 
-	timeout.Reset(10 * time.Second)
-	select {
-	case result := <-ch:
-		timeout.Stop()
-		return result, nil
-	case <-timeout.C:
-		return "Request sent", nil
-	}
+	return "", fmt.Errorf("user not in voice channel")
 
 }
 
-func resumeSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func mediaCommand(userID, guildID string, k media.Action, data string) (string, error) {
 
-	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
+	userVoiceChannel, err := getUserVoiceChannel(userID, guildID)
 	if err != nil {
-		return "You must be in a voice channel to resume the song", nil
+		return fmt.Sprintf("You must be in a voice channel to %v the song",
+			strings.ToLower(k.String())), nil
 	}
 
-	ch := make(chan string)
-
-	req := mediaRequest{commandType: resume, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
-
-	timeout := time.NewTimer(stdTimeout)
-
-	select {
-	case bot.mediaControllerChannel <- req:
-		timeout.Stop()
-	case <-timeout.C:
-		return "Servers busy !", nil
-	}
-
-	timeout.Reset(10 * time.Second)
-	select {
-	case result := <-ch:
-		timeout.Stop()
-		return result, nil
-	case <-timeout.C:
-		return "Request sent", nil
-	}
-}
-
-func skipSound(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-
-	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
-	if err != nil {
-		return "You must be in a voice channel to skip the song", nil
-	}
-
-	ch := make(chan string)
-
-	req := mediaRequest{commandType: skip, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
-
-	timeout := time.NewTimer(stdTimeout)
-
-	select {
-	case bot.mediaControllerChannel <- req:
-		timeout.Stop()
-	case <-timeout.C:
-		return "Servers busy !", nil
-	}
-
-	timeout.Reset(10 * time.Second)
-	select {
-	case result := <-ch:
-		timeout.Stop()
-		return result, nil
-	case <-timeout.C:
-		return "Request sent", nil
-	}
+	return bot.mediaController.Send(guildID, userVoiceChannel, k, data)
 
 }
 
-func disconnectVoice(s *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func playSound(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+	return mediaCommand(m.Author.ID, m.GuildID, media.PLAY, s)
+}
 
-	userVoiceChannel, err := getUserVoiceChannel(s, m.Author.ID, m.GuildID)
-	if err != nil {
-		return "You must be in a voice channel to skip the song", nil
-	}
+func pauseSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+	return mediaCommand(m.Author.ID, m.GuildID, media.PAUSE, "")
+}
 
-	ch := make(chan string)
+func resumeSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+	return mediaCommand(m.Author.ID, m.GuildID, media.RESUME, "")
+}
 
-	req := mediaRequest{commandType: disconnect, guildID: m.GuildID, channelID: userVoiceChannel, returnChan: ch}
+func skipSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+	return mediaCommand(m.Author.ID, m.GuildID, media.SKIP, "")
+}
 
-	timeout := time.NewTimer(stdTimeout)
-
-	select {
-	case bot.mediaControllerChannel <- req:
-		timeout.Stop()
-	case <-timeout.C:
-		return "Servers busy !", nil
-	}
-
-	timeout.Reset(10 * time.Second)
-	select {
-	case result := <-ch:
-		timeout.Stop()
-		return result, nil
-	case <-timeout.C:
-		return "Request sent", nil
-	}
-
+func disconnectVoice(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+	return mediaCommand(m.Author.ID, m.GuildID, media.DISCONNECT, "")
 }
 
 func inspectQueue(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	ch := make(chan string)
-
-	req := mediaRequest{commandType: inspect, guildID: m.GuildID, channelID: "", returnChan: ch}
-
-	timeout := time.NewTimer(stdTimeout)
-	select {
-	case bot.mediaControllerChannel <- req:
-		timeout.Stop()
-	case <-timeout.C:
-		return "Servers busy !", nil
-	}
-
-	timeout = time.NewTimer(10 * time.Second)
-	select {
-	case result := <-ch:
-		timeout.Stop()
-		return result, nil
-	case <-timeout.C:
-		return "Request send", nil
-	}
-
+	return mediaCommand(m.Author.ID, m.GuildID, media.INSPECT, "")
 }

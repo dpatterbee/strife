@@ -1,4 +1,4 @@
-package strife
+package media
 
 import (
 	"context"
@@ -25,22 +25,16 @@ const (
 	inspect
 )
 
+const stdTimeout = time.Millisecond * 500
+
 type mediaSession struct {
 	download *downloadSession
 	encode   *dca.EncodeSession
 	stream   *streamSession
 }
 
-type mediaRequest struct {
-	commandType int
-	guildID     string
-	channelID   string
-	commandData string
-	returnChan  chan string
-}
-
 type playerCommand struct {
-	commandType   int
+	commandType   Action
 	returnChannel chan string
 }
 
@@ -57,7 +51,7 @@ type songReq struct {
 // mediaControlRouter function runs perpetually, maintaining a pool of active media sessions.
 // It routes commands to the correct channel, creating a new media session if one is required to
 // fulfill the request.
-func mediaControlRouter(session *dgo.Session, mediaCommandChannel chan mediaRequest) {
+func controller(session *dgo.Session, mediaCommandChannel chan Request) {
 
 	type activeMC struct {
 		songChannel    chan songReq
@@ -91,30 +85,30 @@ func mediaControlRouter(session *dgo.Session, mediaCommandChannel chan mediaRequ
 		case req := <-mediaCommandChannel:
 			// play and disconnect are special cases of command, as they create and destroy channels
 			// all other commands just get passed through to the respective server.
-			switch req.commandType {
+			switch req.CommandType {
 			case play:
 
-				ch, ok := activeMCs[req.guildID]
+				ch, ok := activeMCs[req.GuildID]
 				if !ok {
-					activeMCs[req.guildID] = activeMC{
+					activeMCs[req.GuildID] = activeMC{
 						controlChannel: make(chan playerCommand, 5),
 						songChannel:    make(chan songReq, 100),
 					}
 
-					ch = activeMCs[req.guildID]
+					ch = activeMCs[req.GuildID]
 
 					// Checks if there exists a guildSoundPlayer goroutine which is currently dying,
 					// and creates the channel required so we can wait for the old goroutine to shut
 					// down.
 					var waitChan chan bool = nil
-					if _, ok := dyingMCs[req.guildID]; ok {
+					if _, ok := dyingMCs[req.GuildID]; ok {
 						waitChan = make(chan bool)
-						dyingMCs[req.guildID] = dyingMC{blocking: true, waitChan: waitChan}
+						dyingMCs[req.GuildID] = dyingMC{blocking: true, waitChan: waitChan}
 					}
 					go guildSoundPlayer(
 						session,
-						req.guildID,
-						req.channelID,
+						req.GuildID,
+						req.ChannelID,
 						ch.controlChannel,
 						ch.songChannel,
 						mediaReturnBegin,
@@ -124,18 +118,18 @@ func mediaControlRouter(session *dgo.Session, mediaCommandChannel chan mediaRequ
 				}
 
 				songReq := songReq{
-					URL:        req.commandData,
-					returnChan: req.returnChan,
+					URL:        req.CommandData,
+					returnChan: req.ReturnChan,
 				}
 
 				select {
 				case ch.songChannel <- songReq:
 				default:
-					go trySend(req.returnChan, "Queue full, please try again later.", stdTimeout)
+					go trySend(req.ReturnChan, "Queue full, please try again later.", stdTimeout)
 				}
 
 			case disconnect:
-				mediaChannel, ok := activeMCs[req.guildID]
+				mediaChannel, ok := activeMCs[req.GuildID]
 
 				if ok {
 					// TODO: There's definitely a potential scenario where this never properly
@@ -143,13 +137,13 @@ func mediaControlRouter(session *dgo.Session, mediaCommandChannel chan mediaRequ
 					// onto a voiceconnection for a while.
 					go reqPassTimeoutClose(mediaChannel.controlChannel, req, 10*time.Minute)
 
-					dyingMCs[req.guildID] = dyingMC{blocking: false, waitChan: nil}
-					delete(activeMCs, req.guildID)
+					dyingMCs[req.GuildID] = dyingMC{blocking: false, waitChan: nil}
+					delete(activeMCs, req.GuildID)
 				}
 
 			default:
 
-				mc, ok := activeMCs[req.guildID]
+				mc, ok := activeMCs[req.GuildID]
 				if ok {
 					go reqPass(mc.controlChannel, req)
 				}
@@ -187,23 +181,23 @@ func mediaControlRouter(session *dgo.Session, mediaCommandChannel chan mediaRequ
 }
 
 // reqPass passes a mediaRequest down a playerCommand channel, timing out after stdTimeout
-func reqPass(ch chan playerCommand, req mediaRequest) {
+func reqPass(ch chan playerCommand, req Request) {
 	reqPassTimeout(ch, req, stdTimeout)
 }
 
-func reqPassTimeoutClose(ch chan playerCommand, req mediaRequest, timeout time.Duration) {
+func reqPassTimeoutClose(ch chan playerCommand, req Request, timeout time.Duration) {
 	reqPassTimeout(ch, req, timeout)
 	close(ch)
 }
 
-func reqPassTimeout(ch chan playerCommand, req mediaRequest, timeout time.Duration) {
+func reqPassTimeout(ch chan playerCommand, req Request, timeout time.Duration) {
 	timer := time.NewTimer(timeout)
 	select {
-	case ch <- playerCommand{commandType: req.commandType, returnChannel: req.returnChan}:
+	case ch <- playerCommand{commandType: req.CommandType, returnChannel: req.ReturnChan}:
 		timer.Stop()
 		return
 	case <-timer.C:
-		go trySend(req.returnChan, "Server busy", stdTimeout)
+		go trySend(req.ReturnChan, "Server busy", stdTimeout)
 		return
 	}
 }
@@ -277,195 +271,6 @@ func newMediaSession(s *yt.Video, vc *dgo.VoiceConnection) (*mediaSession, error
 
 }
 
-func getUserVoiceChannel(sess *dgo.Session, userID, guildID string) (string, error) {
-
-	guild, err := sess.State.Guild(guildID)
-	if err != nil {
-		return "", err
-	}
-
-	for _, v := range guild.VoiceStates {
-		if v.UserID == userID {
-			return v.ChannelID, nil
-		}
-	}
-
-	return "", fmt.Errorf("error: user not in voice channel")
-
-}
-
-// guildSoundPlayer runs while a server has a queue of songs to be played.
-// It loops over the queue of songs and plays them in order, exiting once it has drained the list
-func guildSoundPlayer(
-	discordSession *dgo.Session,
-	guildID, channelID string,
-	controlChannel <-chan playerCommand,
-	songChannel <-chan songReq,
-	mediaReturnRequestChan, mediaReturnFinishChan chan<- string,
-	previousInstanceWaitChan <-chan bool,
-) {
-	log.Info().Msg("Sound handler not active, activating")
-
-	if previousInstanceWaitChan != nil {
-		<-previousInstanceWaitChan
-	}
-
-	queue := newSongQueue(songChannel)
-
-	if !<-queue.firstSongWait {
-		log.Info().Msg("Initial song request too long, shutting down.")
-		mediaReturnRequestChan <- guildID
-		mediaReturnFinishChan <- guildID
-		return
-	}
-
-	// Set up voiceconnection
-	vc, err := discordSession.ChannelVoiceJoin(guildID, channelID, false, true)
-
-	if err != nil {
-		mediaReturnRequestChan <- guildID
-		log.Error().Err(err).Msg("Couldn't initialise voice connection")
-		return
-	}
-
-	disconnectTimer := time.NewTimer(5 * time.Second)
-
-mainLoop:
-	for {
-		if !disconnectTimer.Stop() {
-			<-disconnectTimer.C
-		}
-		disconnectTimer.Reset(5 * time.Second)
-		select {
-		case control := <-controlChannel:
-			switch control.commandType {
-			case disconnect:
-				go trySend(control.returnChannel, "Goodbye.", stdTimeout)
-				break mainLoop
-			default:
-				go trySend(control.returnChannel, "No media playing.", stdTimeout)
-			}
-		case song := <-queue.nextSong:
-			log.Info().
-				Str("URL", song.ID).
-				Str("Title", song.Title).
-				Str("guildID", guildID).
-				Msg("Playing Song")
-			//encode, download, err := newSongSession(song)
-			//streamingSession := newStreamingSession(encode, vc)
-			mediaSession, err := newMediaSession(song, vc)
-			if err != nil {
-				log.Error().Err(err).Msg("")
-				return
-			}
-
-			err = vc.Speaking(true)
-			if err != nil {
-				log.Error().Err(err).Msg("")
-			}
-
-			log.Info().
-				Str("guildID", guildID).
-				Str("channelID", channelID).
-				Msg("Starting Audio Stream")
-
-			mediaSession.stream.Start()
-
-			// controlLoop should only be entered once it is possible to control the media ie. once
-			// the ffmpeg session is up and running
-		controlLoop:
-			for {
-				select {
-
-				case err := <-mediaSession.stream.done:
-					if err := vc.Speaking(false); err != nil {
-						log.Error().Err(err).Msg("")
-					}
-					mediaSession.stop() // Ensure the song cleans up okay.
-					if err == io.EOF {
-						log.Info().Msg("Song Completed.")
-					} else {
-						log.Error().Err(err).Msg("Song Stopped.")
-					}
-					break controlLoop
-
-				case control := <-controlChannel:
-
-					switch control.commandType {
-
-					case pause:
-						ok := mediaSession.pause()
-						if ok {
-							go trySend(control.returnChannel, "Song paused.", stdTimeout)
-						} else {
-							go trySend(control.returnChannel, "Song already paused.", stdTimeout)
-						}
-
-					case resume:
-						ok := mediaSession.resume()
-						if ok {
-							go trySend(control.returnChannel, "Song resumed.", stdTimeout)
-						} else {
-							go trySend(control.returnChannel, "Song already playing", stdTimeout)
-						}
-
-					case skip:
-						if !mediaSession.encode.Running() {
-							go trySend(control.returnChannel, "Not yet.", stdTimeout)
-							continue
-
-						}
-						mediaSession.stop()
-
-						go trySend(control.returnChannel, "Song skipped.", stdTimeout)
-
-						break controlLoop
-
-					case disconnect:
-						if !mediaSession.encode.Running() {
-							go trySend(control.returnChannel, "Not yet.", stdTimeout)
-							continue
-
-						}
-						mediaSession.stop()
-
-						go trySend(control.returnChannel, "Goodbye.", stdTimeout)
-
-						break mainLoop
-
-					case inspect:
-						qch := make(chan []*yt.Video)
-						queue.inspectSongQueue <- qch
-						q := <-qch
-						songTimeRemaining := song.Duration - mediaSession.stream.PlaybackPos()
-						go trySend(control.returnChannel, prettySongList(q, songTimeRemaining), stdTimeout)
-					}
-				}
-			}
-
-		case <-disconnectTimer.C:
-			mediaReturnRequestChan <- guildID
-			break mainLoop
-
-		}
-
-	}
-
-	// End queue goroutine and disconnect from voice channel before informing the coordinator
-	// that we have finished.
-	// TODO: I have implemented the potential for returning the queue after a session ends. This
-	//  could be recovered afterwards.
-	remainingQ := make(chan []*yt.Video)
-	queue.shutdown <- remainingQ
-	<-remainingQ
-	err = vc.Disconnect()
-	if err != nil {
-		log.Error().Err(err).Msg("")
-	}
-	mediaReturnFinishChan <- guildID
-
-}
-
 func (m *mediaSession) stop() {
 	m.stream.Stop()
 	m.download.safeCancel()
@@ -528,6 +333,7 @@ func songQueue(config sq) {
 	var songQueue []*yt.Video
 	nullQ := make(chan *yt.Video)
 	var songChannel *chan *yt.Video
+	log.Info().Msg("Song queue ready")
 	for {
 		var nextSong *yt.Video
 		// This if statement prevents the sending of songs to the player routine if there are no
@@ -579,4 +385,17 @@ func songQueue(config sq) {
 		}
 	}
 
+}
+
+// trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
+func trySend(channel chan string, data string, timeoutDuration time.Duration) {
+	// this will sure lend itself to generics when the time comes.
+	timeout := time.NewTimer(timeoutDuration)
+
+	select {
+	case channel <- data:
+		timeout.Stop()
+	case <-timeout.C:
+		return
+	}
 }

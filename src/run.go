@@ -11,6 +11,7 @@ import (
 	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
+	"github.com/dpatterbee/strife/src/media"
 	"github.com/dpatterbee/strife/src/store"
 	"github.com/dpatterbee/strife/src/store/sqlite"
 	"github.com/rs/zerolog"
@@ -18,10 +19,10 @@ import (
 )
 
 type strifeBot struct {
-	defaultCommands        map[string]botCommand
-	mediaControllerChannel chan mediaRequest
-	session                *dgo.Session
-	store                  store.Store
+	defaultCommands map[string]botCommand
+	mediaController media.Controller
+	session         *dgo.Session
+	store           store.Store
 }
 
 const stdTimeout = time.Millisecond * 500
@@ -75,8 +76,6 @@ func Run() int {
 
 	log.Info().Msg("Discord connection opened")
 
-	bot.mediaControllerChannel = createMainMediaController(bot.session)
-
 	log.Info().Msg("Setup Complete")
 
 	sc := make(chan os.Signal, 1)
@@ -102,6 +101,8 @@ func (b *strifeBot) new() error {
 
 	log.Info().Msg("Getting database")
 	b.store = sqlite.New()
+
+	b.mediaController = media.New(b.session)
 
 	return nil
 }
@@ -235,25 +236,4 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		Str("channelID", message.ChannelID).
 		Msg("")
 
-}
-
-// trySend attempts to send "data" on "channel", timing out after "timeoutDuration".
-func trySend(channel chan string, data string, timeoutDuration time.Duration) {
-	// this will sure lend itself to generics when the time comes.
-	timeout := time.NewTimer(timeoutDuration)
-
-	select {
-	case channel <- data:
-		timeout.Stop()
-	case <-timeout.C:
-		return
-	}
-}
-
-func createMainMediaController(sess *dgo.Session) chan mediaRequest {
-	ch := make(chan mediaRequest)
-
-	go mediaControlRouter(sess, ch)
-
-	return ch
 }

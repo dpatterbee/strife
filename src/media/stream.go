@@ -1,4 +1,4 @@
-package strife
+package media
 
 import (
 	"sync"
