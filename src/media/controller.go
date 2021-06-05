@@ -304,7 +304,7 @@ func prettySongList(yts []*yt.Video, currentSongPos time.Duration) string {
 	return sb.String()
 }
 
-type sq struct {
+type queueConfig struct {
 	requestChan      <-chan songReq
 	nextSong         chan *yt.Video
 	inspectSongQueue chan chan []*yt.Video
@@ -312,8 +312,8 @@ type sq struct {
 	firstSongWait    chan bool
 }
 
-func newSongQueue(requestChan <-chan songReq) sq {
-	s := sq{
+func newSongQueue(requestChan <-chan songReq) queueConfig {
+	s := queueConfig{
 		requestChan:      requestChan,
 		nextSong:         make(chan *yt.Video),
 		inspectSongQueue: make(chan chan []*yt.Video),
@@ -325,7 +325,7 @@ func newSongQueue(requestChan <-chan songReq) sq {
 	return s
 }
 
-func songQueue(config sq) {
+func songQueue(config queueConfig) {
 	client := yt.Client{}
 	first := true
 	success := false
