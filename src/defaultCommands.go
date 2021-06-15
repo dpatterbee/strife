@@ -81,6 +81,9 @@ func makeDefaultCommands() map[string]botCommand {
 
 	for _, v := range something {
 		cmds[v.command] = v
+		for _, w := range v.aliases {
+			cmds[w] = v
+		}
 	}
 
 	return cmds
