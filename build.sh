@@ -6,6 +6,7 @@ build() {
     --build-arg "LITESTREAM_SECRET_ACCESS_KEY=$LITESTREAM_SECRET_ACCESS_KEY" \
     --build-arg "DB_REPLICA_URL=$DB_REPLICA_URL" \
     --build-arg "TOKEN=$TOKEN" \
+    --build-arg "YOUTUBE_API_TOKEN=$YOUTUBE_API_TOKEN" \
     -t strife .
   exit 0
 }

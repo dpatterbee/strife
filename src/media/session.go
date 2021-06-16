@@ -5,7 +5,6 @@ import (
 	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
-	yt "github.com/kkdai/youtube/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -28,7 +27,7 @@ func guildSoundPlayer(
 	queue := newSongQueue(songChannel)
 
 	if !<-queue.firstSongWait {
-		log.Info().Msg("Initial song request too long, shutting down.")
+		log.Info().Msg("Initial song request invalid, shutting down.")
 		mediaReturnRequestChan <- guildID
 		mediaReturnFinishChan <- guildID
 		return
@@ -63,8 +62,7 @@ mainLoop:
 			}
 		case song := <-queue.nextSong:
 			log.Info().
-				Str("URL", song.ID).
-				Str("Title", song.Title).
+				Str("Title", song.Title()).
 				Str("guildID", guildID).
 				Msg("Playing Song")
 			//encode, download, err := newSongSession(song)
@@ -150,10 +148,10 @@ mainLoop:
 						break mainLoop
 
 					case inspect:
-						qch := make(chan []*yt.Video)
+						qch := make(chan []streamable)
 						queue.inspectSongQueue <- qch
 						q := <-qch
-						songTimeRemaining := song.Duration - mediaSession.stream.PlaybackPos()
+						songTimeRemaining := song.Duration() - mediaSession.stream.PlaybackPos()
 						go trySend(control.returnChannel, prettySongList(q, songTimeRemaining), stdTimeout)
 					}
 				}
@@ -171,7 +169,7 @@ mainLoop:
 	// that we have finished.
 	// TODO: I have implemented the potential for returning the queue after a session ends. This
 	//  could be recovered afterwards.
-	remainingQ := make(chan []*yt.Video)
+	remainingQ := make(chan []streamable)
 	queue.shutdown <- remainingQ
 	<-remainingQ
 	err = vc.Disconnect()

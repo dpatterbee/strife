@@ -15,6 +15,7 @@ import (
 	"github.com/dpatterbee/strife/src/store"
 	"github.com/dpatterbee/strife/src/store/sqlite"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/diode"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,8 +34,11 @@ var bot strifeBot
 func Run() int {
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	wr := diode.NewWriter(os.Stdout, 1000, 10*time.Millisecond, func(missed int) {
+		fmt.Printf("Logger Dropped %d messages", missed)
+	})
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: wr, NoColor: true})
 	log.Logger = log.With().Caller().Logger()
 
 	// Create bot discord session and database store
@@ -213,17 +217,17 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		commandFunc := requestedCommand.function
 
 		if userPermissionLevel(s, m) >= neededPermission {
-			response, err = commandFunc(s, m, content)
+			err = commandFunc(s, commandConf, m)
 		} else {
-			response = "Invalid Permission level"
+			err = responder.Set("Invalid Permission level")
 		}
 
 		if err != nil {
-			response = err.Error()
+			log.Error().Err(err).Msg("")
 		}
 	} else {
 		var err error
-		response, err = bot.store.GetCommand(m.GuildID, splitContent[0])
+		response, err := bot.store.GetCommand(m.GuildID, splitContent[0])
 		if err == sql.ErrNoRows {
 			return
 		}
@@ -231,22 +235,7 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 			log.Error().Err(err).Msg("")
 			return
 		}
+		responder.Set(response)
 	}
 
-	response = "**" + response + "**"
-	message, err := s.ChannelMessageSend(m.ChannelID, response)
-	if err != nil {
-		log.Error().
-			Err(err).
-			Str("msg", message.ContentWithMentionsReplaced()).
-			Str("author", message.Author.String()).
-			Str("channelID", message.ChannelID).
-			Msg("")
-	} else {
-		log.Info().
-			Str("msg", message.ContentWithMentionsReplaced()).
-			Str("author", message.Author.String()).
-			Str("channelID", message.ChannelID).
-			Msg("")
-	}
 }

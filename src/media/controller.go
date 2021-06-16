@@ -2,18 +2,18 @@ package media
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	lg "log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
 	"github.com/dpatterbee/bpipe"
+	"github.com/dpatterbee/strife/src/media/youtube"
 	"github.com/jonas747/dca"
-	yt "github.com/kkdai/youtube/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -204,15 +204,10 @@ func reqPassTimeout(ch chan playerCommand, req Request, timeout time.Duration) {
 }
 
 // streamSong uses youtube-dl to download the song and pipe the stream of data to writePipe
-func streamSong(writePipe io.WriteCloser, video *yt.Video, d *downloadSession) {
-
-	client := yt.Client{}
+func streamSong(writePipe io.WriteCloser, video streamable, d *downloadSession) {
 
 	ctx, cancel := context.WithCancel(context.Background())
-	for i, v := range video.Formats {
-		log.Info().Msg(fmt.Sprintf("%v: %v", i, v.AudioQuality))
-	}
-	format, err := videoFormatFinder(video)
+	stream, length, err := video.Stream(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("")
 		cancel()
@@ -221,7 +216,6 @@ func streamSong(writePipe io.WriteCloser, video *yt.Video, d *downloadSession) {
 			log.Error().Err(err).Msg("")
 		}
 	}
-	stream, length, err := client.GetStreamContext(ctx, video, &video.Formats[format])
 	log.Info().Msg(fmt.Sprint(length))
 	defer func(stream io.ReadCloser) {
 		err := stream.Close()
@@ -268,27 +262,7 @@ var audioQualities = map[string]int{
 	"AUDIO_QUALITY_HIGH":   3,
 }
 
-func videoFormatFinder(vid *yt.Video) (int, error) {
-	highestSoFar := 0
-	highestQualityIndex := 0
-	for i, v := range vid.Formats {
-		if v.AudioChannels == 0 || v.AudioQuality == "" {
-			continue
-		}
-		if j, ok := audioQualities[v.AudioQuality]; ok && j > highestSoFar {
-			highestSoFar = j
-			highestQualityIndex = i
-		}
-	}
-
-	if vid.Formats[highestQualityIndex].AudioChannels == 0 {
-		return 0, errors.New("no audio found")
-	}
-
-	return highestQualityIndex, nil
-}
-
-func newMediaSession(s *yt.Video, vc *dgo.VoiceConnection) (*mediaSession, error) {
+func newMediaSession(s streamable, vc *dgo.VoiceConnection) (*mediaSession, error) {
 	bufPipe := bpipe.New()
 
 	var d downloadSession
@@ -334,33 +308,33 @@ func (d *downloadSession) safeCancel() {
 	d.Unlock()
 }
 
-func prettySongList(yts []*yt.Video, currentSongPos time.Duration) string {
+func prettySongList(yts []streamable, currentSongPos time.Duration) string {
 	var sb strings.Builder
 	durationUntilNow := currentSongPos
 
 	for i, v := range yts {
 		// Writes to strings.Builder cannot error
-		_, _ = fmt.Fprintf(&sb, "%d. %s | Playing in: %v\n", i+1, v.Title,
+		_, _ = fmt.Fprintf(&sb, "%d. %s | Playing in: %v\n", i+1, v.Title(),
 			durationUntilNow.Truncate(time.Second).String())
-		durationUntilNow = durationUntilNow + v.Duration
+		durationUntilNow = durationUntilNow + v.Duration()
 	}
 	return sb.String()
 }
 
 type queueConfig struct {
 	requestChan      <-chan songReq
-	nextSong         chan *yt.Video
-	inspectSongQueue chan chan []*yt.Video
-	shutdown         chan chan []*yt.Video
+	nextSong         chan streamable
+	inspectSongQueue chan chan []streamable
+	shutdown         chan chan []streamable
 	firstSongWait    chan bool
 }
 
 func newSongQueue(requestChan <-chan songReq) queueConfig {
 	s := queueConfig{
 		requestChan:      requestChan,
-		nextSong:         make(chan *yt.Video),
-		inspectSongQueue: make(chan chan []*yt.Video),
-		shutdown:         make(chan chan []*yt.Video),
+		nextSong:         make(chan streamable),
+		inspectSongQueue: make(chan chan []streamable),
+		shutdown:         make(chan chan []streamable),
 		firstSongWait:    make(chan bool),
 	}
 	go songQueue(s)
@@ -369,16 +343,22 @@ func newSongQueue(requestChan <-chan songReq) queueConfig {
 }
 
 func songQueue(config queueConfig) {
-	client := yt.Client{}
 	first := true
 	success := false
 
-	var songQueue []*yt.Video
-	nullQ := make(chan *yt.Video)
-	var songChannel *chan *yt.Video
+	defer func(ch chan<- bool) {
+		if first {
+			ch <- false
+			close(config.firstSongWait)
+		}
+	}(config.firstSongWait)
+
+	var songQueue []streamable
+	nullQ := make(chan streamable)
+	var songChannel *chan streamable
 	log.Info().Msg("Song queue ready")
 	for {
-		var nextSong *yt.Video
+		var nextSong streamable
 		// This if statement prevents the sending of songs to the player routine if there are no
 		// songs in the queue.
 		// It sets the channel to a channel which blocks forever,
@@ -393,28 +373,48 @@ func songQueue(config queueConfig) {
 		select {
 		case song := <-config.requestChan:
 
-			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Second)
-			vid, err := client.GetVideoContext(ctx, song.URL)
-			cancel()
-
+			url, err := url.Parse(strings.TrimSpace(song.URL))
 			if err != nil {
 				log.Error().Err(err).Msg("")
-				go trySend(song.returnChan, "Song not found.", stdTimeout)
 				if first {
-					config.firstSongWait <- success
-					close(config.firstSongWait)
 					return
 				}
 				break
 			}
 
-			if vid.Duration <= time.Hour {
-				songQueue = append(songQueue, vid)
-				go trySend(song.returnChan, "Song added to queue.", stdTimeout)
-				success = true
-			} else {
-				log.Error().Msg(fmt.Sprintf("Song duration: %v", vid.Duration))
-				go trySend(song.returnChan, "Song too long.", stdTimeout)
+			var s streamable
+			switch url.Hostname() {
+			case "www.youtube.com", "youtu":
+				s, err = youtube.NewVideo(url.String())
+			case "":
+				var ID string
+				ID, err = searchClient.SearchTopID(song.URL)
+				if err != nil {
+					break
+				}
+				s, err = youtube.NewVideo(ID)
+			default:
+			}
+
+			if err != nil {
+				log.Error().Err(err).Msg("")
+				go trySend(song.returnChan, "Song not found.", stdTimeout)
+				if first {
+					return
+				}
+				continue
+			}
+
+			if s != nil {
+				if s.Duration() <= time.Hour {
+					songQueue = append(songQueue, s)
+					go trySend(song.returnChan, fmt.Sprintf("Song added to queue: %v", s.Title()), stdTimeout)
+					success = true
+				} else {
+					log.Error().Msg(fmt.Sprintf("Song duration: %v", s.Duration()))
+					go trySend(song.returnChan, "Song too long.", stdTimeout)
+				}
+
 			}
 
 			if first {
@@ -428,7 +428,7 @@ func songQueue(config queueConfig) {
 		case ret := <-config.inspectSongQueue:
 			// This is slightly confusing. We do this rather than just sending directly on the
 			// channel so that we avoid data races and also only copy when required.
-			q := make([]*yt.Video, len(songQueue))
+			q := make([]streamable, len(songQueue))
 			copy(q, songQueue)
 			// This is a blocking send. The receiver must listen immediately or be put to death.
 			ret <- q

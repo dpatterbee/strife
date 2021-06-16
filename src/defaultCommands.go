@@ -65,6 +65,9 @@ var something = []botCommand{
 		command: "play", function: playSound, permission: botunknown,
 	},
 	{
+		command: "search", function: titleQuery, permission: botunknown,
+	},
+	{
 		command: "pause", function: pauseSound, permission: botunknown,
 	},
 	{
@@ -94,130 +97,146 @@ func makeDefaultCommands() map[string]botCommand {
 	return cmds
 }
 
-func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func addCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
-	splitString := strings.SplitN(s, " ", 2)
+	splitString := strings.SplitN(c.content, " ", 2)
 
 	if len(splitString) < 2 {
-		return "Correct Syntax is: !addcommand <command name> <command text>", nil
+		c.response.Set("Correct Syntax is: !addcommand <command name> <command text>")
+		return nil
 	}
 
 	command := splitString[0]
 	_, err := bot.store.GetCommand(guildID, command)
 	if err == nil {
-		return fmt.Sprintf("Command \"%v\" already exists!", command), nil
+		c.response.Set(fmt.Sprintf("Command \"%v\" already exists!", command))
+		return nil
 	} else if err != sql.ErrNoRows {
-		return "", err
+		return err
 	}
 
 	err = bot.store.AddOrUpdateCommand(guildID, command, splitString[1])
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), nil
+	c.response.Set(fmt.Sprintf("Command \"%v\" has been successfully added!", command))
+	return nil
 }
 
-func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func editCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
-	splitString := strings.SplitN(s, " ", 2)
+	splitString := strings.SplitN(c.content, " ", 2)
 
 	if len(splitString) < 2 {
-		return "Incorrect Syntax", nil
+		c.response.Set("Incorrect Syntax")
+		return nil
 	}
 	command := splitString[0]
 
 	_, err := bot.store.GetCommand(guildID, command)
 	if err == sql.ErrNoRows {
-		return fmt.Sprintf("Command \"%v\" does not exist!", command), nil
+		c.response.Set(fmt.Sprintf("Command \"%v\" does not exist!", command))
+		return nil
 	} else if err != nil {
-		return "", nil
+		return err
 	}
 
 	err = bot.store.AddOrUpdateCommand(guildID, command, splitString[1])
 	if err != nil {
-		return "", err
+		return err
 	}
-	return fmt.Sprintf("Command \"%v\" has been successfully updated!", command), nil
+	c.response.Set(fmt.Sprintf("Command \"%v\" has been successfully updated!", command))
+	return nil
 
 }
 
-func removeCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func removeCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
-	splitString := strings.SplitN(s, " ", 2)
+	splitString := strings.SplitN(c.content, " ", 2)
 
 	if len(splitString) > 1 {
-		return "Too many args", nil
+		c.response.Set("Incorrect Syntax")
+		return nil
 	}
 
 	command := splitString[0]
 	_, err := bot.store.GetCommand(guildID, command)
 	if err == sql.ErrNoRows {
-		return fmt.Sprintf("Command \"%v\" doesn't exist", command), nil
+		c.response.Set(fmt.Sprintf("Command \"%v\" doesn't exist", command))
+		return nil
 	} else if err != nil {
-		return "", err
+		return err
 	}
 
 	err = bot.store.DeleteCommand(guildID, command)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return fmt.Sprintf("Command \"%v\" successfully removed!", command), nil
+	c.response.Set(fmt.Sprintf("Command \"%v\" successfully removed!", command))
+	return nil
 
 }
 
-func commandsCommand(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
+func commandsCommand(_ *dgo.Session, c commandStuff, _ *dgo.MessageCreate) error {
 
-	return "This command will list commands when I can be bothered typing what they all do", nil
+	c.response.Set("This command will list commands when I can be bothered typing what they all do")
+	return nil
 
 }
 
-func prefix(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func prefix(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 
 	guildID := m.GuildID
 
 	// Do some check for bad characters
-	if len(strings.Split(s, " ")) > 1 {
-		return "Prefix must be a single word", nil
+	if len(strings.Split(c.content, " ")) > 1 {
+		c.response.Set("Prefix must be a single word")
+		return nil
 	}
 
-	if len(s) > 10 {
-		return "Prefix must be 10 or fewer characters", nil
+	if len(c.content) > 10 {
+		c.response.Set("Prefix must be 10 or fewer characters")
+		return nil
 	}
 
-	err := bot.store.SetPrefix(guildID, s)
+	err := bot.store.SetPrefix(guildID, c.content)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return "Prefix successfully updated", nil
+	c.response.Set("Prefix successfully updated")
+	return nil
 }
 
-func polo(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
-	return "polo", nil
+func polo(_ *dgo.Session, c commandStuff, _ *dgo.MessageCreate) error {
+	c.response.Set("polo")
+	return nil
 }
 
-func listCustoms(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func listCustoms(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 
 	var som strings.Builder
 
 	cmds, err := bot.store.GetAllCommands(m.GuildID)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if len(cmds) == 0 {
-		return "Server has no custom commands", nil
+		c.response.Set("Server has no custom commands")
+		return nil
 	}
 
 	for _, v := range cmds {
 		_, _ = fmt.Fprintf(&som, "Command: %v | Text: %v\n", v[0], v[1])
 	}
 
-	return som.String(), nil
+	c.response.Set(som.String())
+	return nil
 }
 
 func isDefaultCommand(s string) bool {
@@ -263,38 +282,48 @@ func getUserVoiceChannel(userID, guildID string) (string, error) {
 
 }
 
-func mediaCommand(userID, guildID string, k media.Action, data string) (string, error) {
+func mediaCommand(userID, guildID string, k media.Action, c commandStuff) error {
 
 	userVoiceChannel, err := getUserVoiceChannel(userID, guildID)
 	if err != nil {
-		return fmt.Sprintf("You must be in a voice channel to %v the song",
-			strings.ToLower(k.String())), nil
+		c.response.Set(fmt.Sprintf("You must be in a voice channel to %v the song",
+			strings.ToLower(k.String())))
+		return nil
 	}
 
-	return bot.mediaController.Send(guildID, userVoiceChannel, k, data)
+	resp, err := bot.mediaController.Send(guildID, userVoiceChannel, k, c.content)
+	c.response.Set(resp)
+	return err
 
 }
 
-func playSound(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.PLAY, s)
+func playSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.PLAY, c)
 }
 
-func pauseSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.PAUSE, "")
+func titleQuery(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+
+	i, err := media.Search(m, c.content)
+	c.response.Set(i)
+	return err
 }
 
-func resumeSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.RESUME, "")
+func pauseSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.PAUSE, c)
 }
 
-func skipSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.SKIP, "")
+func resumeSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.RESUME, c)
 }
 
-func disconnectVoice(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.DISCONNECT, "")
+func skipSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.SKIP, c)
 }
 
-func inspectQueue(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.INSPECT, "")
+func disconnectVoice(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.DISCONNECT, c)
+}
+
+func inspectQueue(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.INSPECT, c)
 }
