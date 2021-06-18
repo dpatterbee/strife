@@ -1,0 +1,24 @@
+image: alpine/edge
+packages:
+        - go
+        - build-base
+        - rsync
+secrets:
+        - e0b69b1a-f4ed-4254-bb6a-e845e0bfe4bb
+        - 69eb5559-6b08-466e-aa36-7e1d48b22d45
+sources:
+        - git@git.sr.ht:~dpatterbee/strife
+tasks:
+        - check-branch: |
+                cd strife
+                if [ "$(git rev-parse origin/deploy)" != "$(git rev-parse HEAD)" ]; then
+                        complete-build
+                fi
+        - test: |
+                echo pass
+        - build: |
+                cd strife
+                go build -v
+        - deploy: |
+                rsync -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/69eb5559-6b08-466e-aa36-7e1d48b22d45" strife/strife root@138.68.165.62:/root/strife
+                ssh -i ~/.ssh/69eb5559-6b08-466e-aa36-7e1d48b22d45 root@138.68.165.62 "/root/restart.sh"

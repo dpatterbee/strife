@@ -7,8 +7,17 @@ if [ ! -d logs ]; then
   exit 1
 fi
 
+logdir="/logs/$(date +%Y%m%d%H%M%S)"
+mkdir $logdir
+
+echo $logdir > /app/logdir
+
 litestream restore -if-replica-exists "$DB_PATH"
 
-litestream replicate > /logs/litelog 2>&1 &
+litestream replicate > "$logdir/litelog" 2>&1 &
 
-/app/strife > /logs/strifelog 2>&1
+/app/strife > "$logdir/strifelog" 2>&1 &
+
+while true; do
+  sleep 86400
+done

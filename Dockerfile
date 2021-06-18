@@ -27,6 +27,7 @@ ENV DB_REPLICA_URL=${DB_REPLICA_URL}
 ENV TOKEN=${TOKEN}
 COPY litestream.yml /etc/litestream.yml
 COPY docker_entrypoint.sh /app/
+COPY restart_bot.sh /app/
 COPY --from=build /out/strife /app/
 COPY --from=build /usr/local/bin/litestream /usr/local/bin/litestream
 CMD ["/app/docker_entrypoint.sh"]
