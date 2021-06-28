@@ -54,7 +54,7 @@ func New(s *discordgo.Session) Controller {
 func (c Controller) Send(guildID, channelID string, commandType Action,
 	commandData string) (string, error) {
 
-	timeout := time.NewTimer(time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	retchan := make(chan string)
 
 	req := Request{

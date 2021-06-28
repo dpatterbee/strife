@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	lg "log"
@@ -202,13 +203,32 @@ func reqPassTimeout(ch chan playerCommand, req Request, timeout time.Duration) {
 	}
 }
 
-// streamSong uses youtube-dl to download the song and pipe the stream of data to w
+// streamSong uses youtube-dl to download the song and pipe the stream of data to writePipe
 func streamSong(writePipe io.WriteCloser, video *yt.Video, d *downloadSession) {
 
 	client := yt.Client{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	resp, err := client.GetStreamContext(ctx, video, &video.Formats[0])
+	for i, v := range video.Formats {
+		log.Info().Msg(fmt.Sprintf("%v: %v", i, v.AudioQuality))
+	}
+	format, err := videoFormatFinder(video)
+	if err != nil {
+		log.Error().Err(err).Msg("")
+		cancel()
+		err := writePipe.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
+	}
+	stream, length, err := client.GetStreamContext(ctx, video, &video.Formats[format])
+	log.Info().Msg(fmt.Sprint(length))
+	defer func(stream io.ReadCloser) {
+		err := stream.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
+	}(stream)
 	if err != nil {
 		log.Error().Err(err).Msg("")
 		cancel()
@@ -218,16 +238,13 @@ func streamSong(writePipe io.WriteCloser, video *yt.Video, d *downloadSession) {
 		}
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Error().Err(err).Msg("")
-		}
-	}(resp.Body)
 	d.cancel = cancel
 	d.Unlock()
 
-	_, err = io.Copy(writePipe, resp.Body)
+	_, err = io.Copy(writePipe, stream)
+	if err != nil {
+		log.Error().Err(err).Msg("")
+	}
 
 	if err != nil {
 		switch err {
@@ -243,6 +260,32 @@ func streamSong(writePipe io.WriteCloser, video *yt.Video, d *downloadSession) {
 	if err != nil {
 		log.Error().Err(err).Msg("")
 	}
+}
+
+var audioQualities = map[string]int{
+	"AUDIO_QUALITY_LOW":    1,
+	"AUDIO_QUALITY_MEDIUM": 2,
+	"AUDIO_QUALITY_HIGH":   3,
+}
+
+func videoFormatFinder(vid *yt.Video) (int, error) {
+	highestSoFar := 0
+	highestQualityIndex := 0
+	for i, v := range vid.Formats {
+		if v.AudioChannels == 0 || v.AudioQuality == "" {
+			continue
+		}
+		if j, ok := audioQualities[v.AudioQuality]; ok && j > highestSoFar {
+			highestSoFar = j
+			highestQualityIndex = i
+		}
+	}
+
+	if vid.Formats[highestQualityIndex].AudioChannels == 0 {
+		return 0, errors.New("no audio found")
+	}
+
+	return highestQualityIndex, nil
 }
 
 func newMediaSession(s *yt.Video, vc *dgo.VoiceConnection) (*mediaSession, error) {
@@ -349,27 +392,32 @@ func songQueue(config queueConfig) {
 
 		select {
 		case song := <-config.requestChan:
-			func(url songReq) {
-				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-				defer cancel()
-				vid, err := client.GetVideoContext(ctx, song.URL)
-				if err != nil {
-					go trySend(song.returnChan, "Song not found.", stdTimeout)
-					return
-				}
-				if vid.Duration <= time.Hour {
-					songQueue = append(songQueue, vid)
-					go trySend(song.returnChan, "Song added to queue.", stdTimeout)
-					success = true
-				} else {
-					go trySend(song.returnChan, "Song too long.", stdTimeout)
-				}
-			}(song)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Second)
+			vid, err := client.GetVideoContext(ctx, song.URL)
+			cancel()
+
+			if err != nil {
+				log.Error().Err(err).Msg("")
+				go trySend(song.returnChan, "Song not found.", stdTimeout)
+				return
+			}
+
+			if vid.Duration <= time.Hour {
+				songQueue = append(songQueue, vid)
+				go trySend(song.returnChan, "Song added to queue.", stdTimeout)
+				success = true
+			} else {
+				log.Error().Msg(fmt.Sprintf("Song duration: %v", vid.Duration))
+				go trySend(song.returnChan, "Song too long.", stdTimeout)
+			}
+
 			if first {
 				first = !first
 				config.firstSongWait <- success
 				close(config.firstSongWait)
 			}
+
 		case *songChannel <- nextSong:
 			songQueue = songQueue[1:]
 		case ret := <-config.inspectSongQueue:
