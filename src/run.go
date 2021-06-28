@@ -215,8 +215,12 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 	} else {
 		var err error
 		response, err = bot.store.GetCommand(m.GuildID, splitContent[0])
+		if err == sql.ErrNoRows {
+			return
+		}
 		if err != nil {
 			log.Error().Err(err).Msg("")
+			return
 		}
 	}
 
@@ -229,11 +233,11 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 			Str("author", message.Author.String()).
 			Str("channelID", message.ChannelID).
 			Msg("")
+	} else {
+		log.Info().
+			Str("msg", message.ContentWithMentionsReplaced()).
+			Str("author", message.Author.String()).
+			Str("channelID", message.ChannelID).
+			Msg("")
 	}
-	log.Info().
-		Str("msg", message.ContentWithMentionsReplaced()).
-		Str("author", message.Author.String()).
-		Str("channelID", message.ChannelID).
-		Msg("")
-
 }
