@@ -79,7 +79,7 @@ func Run() int {
 	log.Info().Msg("Setup Complete")
 
 	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
 	fmt.Print("\n")
 	return 0
@@ -126,6 +126,9 @@ func ready(s *dgo.Session, r *dgo.Ready) {
 		}
 
 		rs, err := s.GuildRoles(v.ID)
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
 		for _, w := range rs {
 			if in(w.Name, roles) {
 				err = bot.store.AddRole(v.ID, w.Name, w.ID)
