@@ -400,7 +400,12 @@ func songQueue(config queueConfig) {
 			if err != nil {
 				log.Error().Err(err).Msg("")
 				go trySend(song.returnChan, "Song not found.", stdTimeout)
-				return
+				if first {
+					config.firstSongWait <- success
+					close(config.firstSongWait)
+					return
+				}
+				break
 			}
 
 			if vid.Duration <= time.Hour {
