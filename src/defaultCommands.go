@@ -32,7 +32,12 @@ var roles = []string{
 	"botadmin",
 }
 
-type defCommand func(*dgo.Session, *dgo.MessageCreate, string) (string, error)
+type commandStuff struct {
+	content  string
+	response *Message
+}
+
+type defCommand func(*dgo.Session, commandStuff, *dgo.MessageCreate) error
 
 var something = []botCommand{
 	{

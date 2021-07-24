@@ -188,6 +188,9 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 	if !strings.HasPrefix(m.Content, prefix) {
 		return
 	}
+
+	responder := NewMessage(m.ChannelID)
+
 	content := strings.TrimPrefix(m.Content, prefix)
 
 	splitContent := strings.Split(content, " ")
@@ -197,7 +200,10 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		content = strings.TrimPrefix(content, splitContent[0]+" ")
 	}
 
-	var response string
+	commandConf := commandStuff{
+		content:  content,
+		response: responder,
+	}
 
 	if isDefaultCommand(splitContent[0]) {
 		requestedCommand := bot.defaultCommands[splitContent[0]]
