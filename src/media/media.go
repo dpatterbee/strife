@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/dpatterbee/strife/src/messages"
 )
 
 // Controller represents an active media controller.
@@ -32,6 +33,7 @@ type Request struct {
 	GuildID     string
 	ChannelID   string
 	CommandData string
+	Responder   *messages.Message
 	ReturnChan  chan string
 }
 

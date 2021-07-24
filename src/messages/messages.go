@@ -18,10 +18,17 @@ type Message struct {
 	sync.Mutex
 }
 
-func New(channelID string) *Message {
+func New(session *discordgo.Session, channelID string) (*Message, error) {
+	if session == nil {
+		return nil, errors.New("missing session")
+	}
+	if channelID == "" {
+		return nil, errors.New("missing channelID")
+	}
 	return &Message{
 		channel: channelID,
-	}
+		session: session,
+	}, nil
 }
 
 func logMessageWithError(message *discordgo.Message, err error) {

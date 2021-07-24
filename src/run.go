@@ -190,7 +190,11 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		return
 	}
 
-	responder := messages.New(m.ChannelID)
+	responder, err := messages.New(s, m.ChannelID)
+	if err != nil {
+		log.Error().Err(err).Msg("")
+		return
+	}
 
 	content := strings.TrimPrefix(m.Content, prefix)
 
@@ -208,19 +212,14 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 
 	if isDefaultCommand(splitContent[0]) {
 		requestedCommand := bot.defaultCommands[splitContent[0]]
-		var err error
 
 		neededPermission := requestedCommand.permission
 		commandFunc := requestedCommand.function
 
 		if userPermissionLevel(s, m) >= neededPermission {
-			err = commandFunc(s, commandConf, m)
+			_ = commandFunc(s, commandConf, m)
 		} else {
 			responder.Set("Invalid Permission level")
-		}
-
-		if err != nil {
-			responder.Set(err.Error())
 		}
 	} else {
 		var err error
