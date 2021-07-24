@@ -12,6 +12,7 @@ import (
 
 	dgo "github.com/bwmarrin/discordgo"
 	"github.com/dpatterbee/strife/src/media"
+	"github.com/dpatterbee/strife/src/messages"
 	"github.com/dpatterbee/strife/src/store"
 	"github.com/dpatterbee/strife/src/store/sqlite"
 	"github.com/rs/zerolog"
@@ -189,7 +190,7 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		return
 	}
 
-	responder := NewMessage(m.ChannelID)
+	responder := messages.New(m.ChannelID)
 
 	content := strings.TrimPrefix(m.Content, prefix)
 
@@ -213,17 +214,17 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		commandFunc := requestedCommand.function
 
 		if userPermissionLevel(s, m) >= neededPermission {
-			response, err = commandFunc(s, m, content)
+			err = commandFunc(s, commandConf, m)
 		} else {
-			response = "Invalid Permission level"
+			responder.Set("Invalid Permission level")
 		}
 
 		if err != nil {
-			response = err.Error()
+			responder.Set(err.Error())
 		}
 	} else {
 		var err error
-		response, err = bot.store.GetCommand(m.GuildID, splitContent[0])
+		response, err := bot.store.GetCommand(m.GuildID, splitContent[0])
 		if err == sql.ErrNoRows {
 			return
 		}
@@ -231,22 +232,7 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 			log.Error().Err(err).Msg("")
 			return
 		}
-	}
 
-	response = "**" + response + "**"
-	message, err := s.ChannelMessageSend(m.ChannelID, response)
-	if err != nil {
-		log.Error().
-			Err(err).
-			Str("msg", message.ContentWithMentionsReplaced()).
-			Str("author", message.Author.String()).
-			Str("channelID", message.ChannelID).
-			Msg("")
-	} else {
-		log.Info().
-			Str("msg", message.ContentWithMentionsReplaced()).
-			Str("author", message.Author.String()).
-			Str("channelID", message.ChannelID).
-			Msg("")
+		responder.Set(response)
 	}
 }

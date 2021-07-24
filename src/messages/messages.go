@@ -1,4 +1,4 @@
-package strife
+package messages
 
 import (
 	"errors"
@@ -10,6 +10,7 @@ import (
 
 type Message struct {
 	m         *discordgo.Message
+	session   *discordgo.Session
 	messageID string
 	isSent    bool
 	channel   string
@@ -17,7 +18,7 @@ type Message struct {
 	sync.Mutex
 }
 
-func NewMessage(channelID string) *Message {
+func New(channelID string) *Message {
 	return &Message{
 		channel: channelID,
 	}
@@ -48,7 +49,7 @@ func (m *Message) Delete() error {
 		return errors.New("message not sent")
 	}
 
-	return bot.session.ChannelMessageDelete(m.channel, m.m.ID)
+	return m.session.ChannelMessageDelete(m.channel, m.m.ID)
 
 }
 
@@ -79,7 +80,7 @@ func (m *Message) setRawAsync(s string, errchan chan<- error) {
 	defer m.Unlock()
 
 	if !m.isSent {
-		message, err := bot.session.ChannelMessageSend(m.channel, s)
+		message, err := m.session.ChannelMessageSend(m.channel, s)
 		if err != nil {
 			logMessageWithError(message, err)
 			if errchan != nil {
@@ -93,7 +94,7 @@ func (m *Message) setRawAsync(s string, errchan chan<- error) {
 		return
 	}
 
-	message, err := bot.session.ChannelMessageEdit(m.channel, m.m.ID, s)
+	message, err := m.session.ChannelMessageEdit(m.channel, m.m.ID, s)
 	if err != nil {
 		logMessageWithError(message, err)
 		if errchan != nil {

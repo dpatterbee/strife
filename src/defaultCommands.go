@@ -7,6 +7,7 @@ import (
 
 	dgo "github.com/bwmarrin/discordgo"
 	"github.com/dpatterbee/strife/src/media"
+	"github.com/dpatterbee/strife/src/messages"
 )
 
 type botCommand struct {
@@ -34,7 +35,7 @@ var roles = []string{
 
 type commandStuff struct {
 	content  string
-	response *Message
+	response *messages.Message
 }
 
 type defCommand func(*dgo.Session, commandStuff, *dgo.MessageCreate) error
@@ -94,13 +95,14 @@ func makeDefaultCommands() map[string]botCommand {
 	return cmds
 }
 
-func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func addCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
-	splitString := strings.SplitN(s, " ", 2)
+	splitString := strings.SplitN(c.content, " ", 2)
 
 	if len(splitString) < 2 {
-		return "Correct Syntax is: !addcommand <command name> <command text>", nil
+		c.response.Set("Correct Syntax is: !addcommand <command name> <command text>")
+		return nil
 	}
 
 	command := splitString[0]
@@ -119,7 +121,7 @@ func addCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) 
 	return fmt.Sprintf("Command \"%v\" has been successfully added!", command), nil
 }
 
-func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func editCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
 	splitString := strings.SplitN(s, " ", 2)
@@ -144,7 +146,7 @@ func editCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error)
 
 }
 
-func removeCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func removeCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	guildID := m.GuildID
 
 	splitString := strings.SplitN(s, " ", 2)
@@ -170,13 +172,13 @@ func removeCommand(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, erro
 
 }
 
-func commandsCommand(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
+func commandsCommand(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 
 	return "This command will list commands when I can be bothered typing what they all do", nil
 
 }
 
-func prefix(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
+func prefix(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 
 	guildID := m.GuildID
 
@@ -197,11 +199,11 @@ func prefix(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
 	return "Prefix successfully updated", nil
 }
 
-func polo(_ *dgo.Session, _ *dgo.MessageCreate, _ string) (string, error) {
+func polo(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return "polo", nil
 }
 
-func listCustoms(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func listCustoms(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 
 	var som strings.Builder
 
@@ -263,38 +265,42 @@ func getUserVoiceChannel(userID, guildID string) (string, error) {
 
 }
 
-func mediaCommand(userID, guildID string, k media.Action, data string) (string, error) {
+func mediaCommand(userID, guildID string, k media.Action, data string) error {
 
 	userVoiceChannel, err := getUserVoiceChannel(userID, guildID)
 	if err != nil {
-		return fmt.Sprintf("You must be in a voice channel to %v the song",
-			strings.ToLower(k.String())), nil
+		return err
 	}
 
-	return bot.mediaController.Send(guildID, userVoiceChannel, k, data)
+	_, err = bot.mediaController.Send(guildID, userVoiceChannel, k, data)
+	if err != nil {
+		return err
+	}
+
+	return nil
 
 }
 
-func playSound(_ *dgo.Session, m *dgo.MessageCreate, s string) (string, error) {
-	return mediaCommand(m.Author.ID, m.GuildID, media.PLAY, s)
+func playSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
+	return mediaCommand(m.Author.ID, m.GuildID, media.PLAY, c.content)
 }
 
-func pauseSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func pauseSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return mediaCommand(m.Author.ID, m.GuildID, media.PAUSE, "")
 }
 
-func resumeSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func resumeSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return mediaCommand(m.Author.ID, m.GuildID, media.RESUME, "")
 }
 
-func skipSound(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func skipSound(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return mediaCommand(m.Author.ID, m.GuildID, media.SKIP, "")
 }
 
-func disconnectVoice(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func disconnectVoice(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return mediaCommand(m.Author.ID, m.GuildID, media.DISCONNECT, "")
 }
 
-func inspectQueue(_ *dgo.Session, m *dgo.MessageCreate, _ string) (string, error) {
+func inspectQueue(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return mediaCommand(m.Author.ID, m.GuildID, media.INSPECT, "")
 }
