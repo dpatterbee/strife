@@ -18,6 +18,9 @@ litestream replicate > "$logdir/litelog" 2>&1 &
 
 /app/strife > "$logdir/strifelog" 2>&1 &
 
+ln -f "$logdir/litelog" /logs/litelog
+ln -f "$logdir/strifelog" /logs/strifelog
+
 while true; do
   sleep 86400
 done
