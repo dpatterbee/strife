@@ -20,5 +20,7 @@ tasks:
                 cd strife
                 go build -v
         - deploy: |
-                rsync -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/69eb5559-6b08-466e-aa36-7e1d48b22d45" strife/strife root@138.68.165.62:/root/strife
-                ssh -i ~/.ssh/69eb5559-6b08-466e-aa36-7e1d48b22d45 root@138.68.165.62 "/root/restart.sh"
+                echo "StrictHostKeyChecking=no" >> ~/.ssh/config
+                echo "IdentityFile ~/.ssh/69eb5559-6b08-466e-aa36-7e1d48b22d45" >> ~/.ssh/config
+                rsync -P strife/strife root@138.68.165.62:/root/strife
+                ssh root@138.68.165.62 "/root/restart.sh"
