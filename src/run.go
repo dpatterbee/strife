@@ -232,11 +232,9 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("msg", message.ContentWithMentionsReplaced()).
-			Str("author", message.Author.String()).
-			Str("channelID", message.ChannelID).
 			Msg("")
-	} else {
+	}
+	if message != nil {
 		log.Info().
 			Str("msg", message.ContentWithMentionsReplaced()).
 			Str("author", message.Author.String()).
