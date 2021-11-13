@@ -11,11 +11,11 @@ import (
 	"time"
 
 	dgo "github.com/bwmarrin/discordgo"
+	_ "github.com/dpatterbee/strife/src/log"
 	"github.com/dpatterbee/strife/src/media"
+	"github.com/dpatterbee/strife/src/media/player"
 	"github.com/dpatterbee/strife/src/store"
 	"github.com/dpatterbee/strife/src/store/sqlite"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/diode"
 	"github.com/rs/zerolog/log"
 )
 
@@ -32,14 +32,6 @@ var bot strifeBot
 
 // Run starts strife
 func Run() int {
-
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	wr := diode.NewWriter(os.Stdout, 1000, 10*time.Millisecond, func(missed int) {
-		fmt.Printf("Logger Dropped %d messages", missed)
-	})
-
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: wr, NoColor: true})
-	log.Logger = log.With().Caller().Logger()
 
 	// Create bot discord session and database store
 	err := bot.new()
@@ -106,7 +98,7 @@ func (b *strifeBot) new() error {
 	log.Info().Msg("Getting database")
 	b.store = sqlite.New()
 
-	b.mediaController = media.New(b.session)
+	b.mediaController = player.NewCoordinator(b.session)
 
 	return nil
 }
@@ -209,14 +201,12 @@ func messageCreate(s *dgo.Session, m *dgo.MessageCreate) {
 		response: responder,
 	}
 
-	if isDefaultCommand(splitContent[0]) {
-		requestedCommand := bot.defaultCommands[splitContent[0]]
+	if requestedCommand, ok := bot.defaultCommands[splitContent[0]]; ok {
 		var err error
 
-		neededPermission := requestedCommand.permission
 		commandFunc := requestedCommand.function
 
-		if userPermissionLevel(s, m) >= neededPermission {
+		if userPermissionLevel(s, m) >= requestedCommand.permission {
 			err = commandFunc(s, commandConf, m)
 		} else {
 			err = responder.Set("Invalid Permission level")

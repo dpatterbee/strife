@@ -239,11 +239,6 @@ func listCustoms(_ *dgo.Session, c commandStuff, m *dgo.MessageCreate) error {
 	return nil
 }
 
-func isDefaultCommand(s string) bool {
-	_, ok := bot.defaultCommands[s]
-	return ok
-}
-
 func userPermissionLevel(s *dgo.Session, m *dgo.MessageCreate) int {
 
 	b, _ := s.GuildMember(m.GuildID, m.Author.ID)
@@ -292,6 +287,7 @@ func mediaCommand(userID, guildID string, k media.Action, c commandStuff) error 
 	}
 
 	resp, err := bot.mediaController.Send(guildID, userVoiceChannel, k, c.content)
+	// resp, err := bot.mediaCoordinator.Send(...)
 	c.response.Set(resp)
 	return err
 

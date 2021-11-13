@@ -109,7 +109,7 @@ func (c *Client) Search(m *discordgo.MessageCreate, request string) (string, err
 	}
 	var sb strings.Builder
 	for i, v := range vid.Items {
-		_, _ = fmt.Fprintf(&sb, "%v. %v [%v]\n", i, v.Snippet.Title,
+		_, _ = fmt.Fprintf(&sb, "%v. %v [%v]\n", i+1, v.Snippet.Title,
 			strings.ToLower(v.ContentDetails.Duration[2:]))
 	}
 	return sb.String(), nil

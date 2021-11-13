@@ -24,16 +24,16 @@ func guildSoundPlayer(
 		<-previousInstanceWaitChan
 	}
 
-	queue := newSongQueue(songChannel)
+	q := newSongQueue(songChannel)
 
-	if !<-queue.firstSongWait {
+	if !q.firstSongValid() {
 		log.Info().Msg("Initial song request invalid, shutting down.")
 		mediaReturnRequestChan <- guildID
 		mediaReturnFinishChan <- guildID
 		return
 	}
 
-	// Set up voiceconnection
+	// Set up voice connection
 	vc, err := discordSession.ChannelVoiceJoin(guildID, channelID, false, true)
 
 	if err != nil {
@@ -60,14 +60,15 @@ mainLoop:
 			default:
 				go trySend(control.returnChannel, "No media playing.", stdTimeout)
 			}
-		case song := <-queue.nextSong:
+		case song := <-q.nextSong:
 			log.Info().
 				Str("Title", song.Title()).
 				Str("guildID", guildID).
 				Msg("Playing Song")
-			//encode, download, err := newSongSession(song)
-			//streamingSession := newStreamingSession(encode, vc)
-			mediaSession, err := newMediaSession(song, vc)
+			// encode, download, err := newSongSession(song)
+			// streamingSession := newStreamingSession(encode, vc)
+			mediaSession, err := NewMediaSession(song, vc)
+			// ms, err := streamer.NewSession(vc, song)
 			if err != nil {
 				log.Error().Err(err).Msg("")
 				return
@@ -84,6 +85,7 @@ mainLoop:
 				Msg("Starting Audio Stream")
 
 			mediaSession.stream.Start()
+			// ms.Start()
 
 			// controlLoop should only be entered once it is possible to control the media ie. once
 			// the ffmpeg session is up and running
@@ -148,8 +150,8 @@ mainLoop:
 						break mainLoop
 
 					case inspect:
-						qch := make(chan []streamable)
-						queue.inspectSongQueue <- qch
+						qch := make(chan []Streamable)
+						q.inspectSongQueue <- qch
 						q := <-qch
 						songTimeRemaining := song.Duration() - mediaSession.stream.PlaybackPos()
 						go trySend(control.returnChannel, prettySongList(q, songTimeRemaining), stdTimeout)
@@ -169,8 +171,8 @@ mainLoop:
 	// that we have finished.
 	// TODO: I have implemented the potential for returning the queue after a session ends. This
 	//  could be recovered afterwards.
-	remainingQ := make(chan []streamable)
-	queue.shutdown <- remainingQ
+	remainingQ := make(chan []Streamable)
+	q.shutdown <- remainingQ
 	<-remainingQ
 	err = vc.Disconnect()
 	if err != nil {

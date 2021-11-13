@@ -12,11 +12,11 @@ import (
 	"github.com/dpatterbee/strife/src/search"
 )
 
-// Controller represents an active media controller.
-type Controller struct {
-	rch     chan Request
-	session *discordgo.Session
-	active  bool
+type Controller interface {
+	Send(
+		guildID, channelID string, commandType Action,
+		commandData string,
+	) (string, error)
 }
 
 //go:generate stringer -type=Action
@@ -40,7 +40,7 @@ type Request struct {
 	ReturnChan  chan string
 }
 
-type streamable interface {
+type Streamable interface {
 	Stream(context.Context) (data io.ReadCloser, duration int64, err error)
 	Title() string
 	Duration() time.Duration
@@ -66,50 +66,6 @@ func init() {
 	}
 }
 
-// New returns a new media.Controller
-func New(s *discordgo.Session) Controller {
-	ch := make(chan Request)
-
-	go controller(s, ch)
-
-	return Controller{rch: ch, session: s, active: true}
-}
-
 func Search(m *discordgo.MessageCreate, c string) (string, error) {
 	return searchClient.Search(m, c)
-}
-
-// Send sends a Request to the Controller
-func (c Controller) Send(guildID, channelID string, commandType Action,
-	commandData string) (string, error) {
-
-	timeout := time.NewTimer(5 * time.Second)
-	retchan := make(chan string)
-
-	req := Request{
-		CommandType: commandType,
-		GuildID:     guildID,
-		ChannelID:   channelID,
-		CommandData: commandData,
-		ReturnChan:  retchan,
-	}
-
-	if !c.active {
-		return "", ErrNotActive
-	}
-	select {
-	case c.rch <- req:
-	case <-timeout.C:
-		return "", ErrServerBusy
-	}
-
-	select {
-	case s := <-retchan:
-		timeout.Stop()
-		return s, nil
-	case <-timeout.C:
-		return "Request sent", nil
-
-	}
-
 }

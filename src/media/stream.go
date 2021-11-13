@@ -102,7 +102,7 @@ func (s *streamSession) Streaming() bool {
 
 // Pause pauses the current streamSession.
 // Due to the nature of the streamSession, the only difference between pausing and
-// stopping a stream is that stopping is typically followed by the discarding of the
+// stopping a streamer is that stopping is typically followed by the discarding of the
 // streamSession itself. Hence Pause is simply an alias of Stop.
 func (s *streamSession) Pause() bool {
 	return s.Stop()
