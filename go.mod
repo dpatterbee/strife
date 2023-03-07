@@ -10,5 +10,5 @@ require (
 	github.com/kkdai/youtube/v2 v2.7.2
 	github.com/mattn/go-sqlite3 v1.14.7
 	github.com/rs/zerolog v1.23.0
-	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e // indirect
+	golang.org/x/crypto v0.1.0 // indirect
 )
